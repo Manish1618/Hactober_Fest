@@ -152,5 +152,5 @@ def test_google_adapter_turns_thinking_off_by_default():
 
     _google(handler).generate("p", SqlDraft, prompt_version="v1")
     _google(handler, thinking=True).generate("p", SqlDraft, prompt_version="v1")
-    assert "Do not think" in bodies[0]["systemInstruction"]["parts"][0]["text"]
+    assert "Thinking is disabled" in bodies[0]["systemInstruction"]["parts"][0]["text"]
     assert "systemInstruction" not in bodies[1]
