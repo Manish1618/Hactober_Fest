@@ -94,7 +94,7 @@ Each answer card shows the status, the answer, assumption chips and a plain-lang
 explanation, with a collapsed **Evidence** section: the question as understood, the exact SQL,
 the Snowflake query ID, run details, the first 50 rows, the query facts read from the SQL,
 tables and columns used, the data's date coverage, the model and prompt versions, the answer
-check result and any limits.
+check result, the alignment check (whether the SQL answers the question asked) and any limits.
 
 The page also draws what fits the result, using only the rows shown as evidence: one number
 becomes a KPI card, a date or year with a number becomes a line chart, and up to 15 labelled

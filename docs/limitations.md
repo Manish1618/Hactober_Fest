@@ -35,10 +35,13 @@ the limit.
 ## Model
 
 - **Gemma can draft wrong SQL that passes validation.** The validator checks safety and that
-  tables, columns and joins are known and declared. It cannot check that the SQL answers the
-  question that was meant. Accuracy is measured on the golden and held-out sets
-  ([evaluation.md](evaluation.md)), not guaranteed. The evidence panel shows the SQL so a reader
-  can check it.
+  tables, columns and joins are known and declared. The alignment check then catches near-misses:
+  code proves a few cases (a year the query does not use, a missing top-N limit, a missing
+  breakdown) and a second Gemma pass judges the rest. That second pass is itself a model and can
+  be wrong in both directions, so a model-only doubt is flagged rather than refused, and the check
+  adds one model call (a few seconds) per question. Accuracy is measured on the golden and
+  held-out sets ([evaluation.md](evaluation.md)), not guaranteed. The evidence panel shows the SQL
+  and the alignment result so a reader can check them.
 - **Explanations are checked for facts, not for wording.** The verifier
   (`src/datamind/pipeline/verify.py`) checks that every number traces to the result, a query fact
   or the question, and that the explanation mentions every key query fact. The phrasing is the

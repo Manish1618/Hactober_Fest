@@ -34,6 +34,11 @@ Gemma never runs anything and never decides what is safe.
     |   at most 2 repairs, then ERROR
     v
  [8 query facts]  tables, filters, grouping, order, limit from SQL   code
+    |
+ [8b alignment]  year, top-N limit, breakdown match the question    code
+    |            second reading: does the SQL answer it?           Gemma
+    |   mismatch -> one repair; code mismatch left -> CLARIFY,
+    |   model doubt left -> answer flagged in the evidence
     |   no rows / only NULLs -> NO_DATA with likely cause
     v
  [9 answer]  Gemma writes text with {rN.col} placeholders            Gemma
@@ -105,6 +110,17 @@ All steps live in `Pipeline.ask` in `src/datamind/pipeline/run.py` unless noted.
    is not involved. An empty result, or one with only NULLs, returns `NO_DATA`. `_diagnose_empty`
    then checks each equality filter value with a small validated query and suggests values that
    exist, or compares the date range with the data's coverage.
+9b. **Alignment check (code, then Gemma).** A valid query can still answer a near-miss: another
+    year, no top-N limit, no breakdown, the wrong measure. `code_problems` in
+    `src/datamind/pipeline/align.py` proves the narrow cases from the question and the query
+    facts: a year in the question must be used by the query, "top 5" or "which five ... most"
+    needs `LIMIT 5`, and "per month" or "by country" over an aggregate needs a `GROUP BY`. When
+    those pass, prompt `align_v1` asks Gemma, separately from the draft, to restate the SQL and
+    say whether it answers the question. A mismatch is fed back for one repair. A code mismatch
+    that survives returns `CLARIFY` with the reason; a model-only doubt keeps the answer but marks
+    it flagged in the evidence and limits. `evidence.alignment` records passed, repaired, flagged
+    or failed, and `alignment_restated` holds the model's reading of the SQL. Golden group T9
+    holds near-miss traps.
 10. **Answer (Gemma, filled by code).** Prompt `answer_v2` gets the question, up to 20 result rows
     (`ANSWER_ROWS`) numbered `r1`, `r2`, and so on, the row count and the query facts. Gemma must
     write numbers as placeholders such as `{r1.REVENUE}`. `fill_placeholders` in
@@ -190,6 +206,7 @@ sidebar when the hosted provider is active (`src/datamind/ui/app.py`).
 | `src/datamind/pipeline/validator.py` | SQL validator |
 | `src/datamind/pipeline/facts.py` | Query facts from the executed SQL |
 | `src/datamind/pipeline/answer.py` | Placeholder filling, code-built answer and explanation |
+| `src/datamind/pipeline/align.py` | Alignment check: does the SQL answer the question |
 | `src/datamind/pipeline/verify.py` | Number and fact verifier |
 | `src/datamind/pipeline/context.py` | Conversation history for follow-ups |
 | `src/datamind/snowflake_io/executor.py` | `SnowflakeExecutor`, `LocalExecutor` |
