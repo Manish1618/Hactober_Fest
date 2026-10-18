@@ -158,8 +158,28 @@ without a report file to back them.
 
 | Run | Date | Backend | Model | T1 | T2 | T3 | T4 | T5 | T6 | T7 | T8 | Accuracy | Faithfulness | Evidence | Fidelity | Median / p95 | Report |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Golden | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | n/a | TODO | TODO | TODO | TODO | TODO | TODO |
-| Held-out | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | TODO | n/a | n/a | TODO | TODO | TODO | TODO | TODO | TODO |
-| Data change (`tpch_demo`) | TODO | TODO | TODO | n/a | n/a | n/a | n/a | n/a | n/a | n/a | TODO | n/a | TODO | TODO | TODO | n/a | TODO |
+| Golden (`tpch_sf1`) | 2026-10-18 | Snowflake | gemma-4-26b-a4b-it | 8/8 | 8/8 | 6/6 | 7/7 | 6/6 | 10/10 | 10/10 | n/a | 45/45 (100%) | 37/38 (97%) | 40/40 | 38/38 | 15.2 s / 121.6 s | `tpch_sf1-dev-20261018T110604.json` |
+| Held-out (`tpch_sf1`) | 2026-10-18 | Snowflake | gemma-4-26b-a4b-it | 4/4 | 4/4 | 2/2 | 3/3 | 2/2 | 4/4 | n/a | n/a | 19/19 (100%) | 16/16 | 17/17 | 16/16 | 20.5 s / 50.9 s | `tpch_sf1-heldout-20261018T112949.json` |
+| Data change (`tpch_demo`) | 2026-10-18 | Snowflake | gemma-4-26b-a4b-it | n/a | n/a | n/a | n/a | n/a | n/a | n/a | 3/3 | n/a | 3/3 | 3/3 | 3/3 | n/a | `tpch_demo-dev-20261018T110224.json` |
+| Golden (`owid_indicators`) | 2026-10-18 | Snowflake | gemma-4-26b-a4b-it | 2/2 | 1/2 | 3/3 | n/a | n/a | 4/4 | n/a | n/a | 10/11 (91%) | 7/7 | 9/9 | 7/7 | 30.3 s / 324.0 s | `owid_indicators-dev-20261018T114850.json` |
+| Held-out (`owid_indicators`) | 2026-10-18 | Snowflake | gemma-4-26b-a4b-it | 1/1 | 1/1 | 1/1 | n/a | n/a | n/a | n/a | n/a | 3/3 (100%) | 3/3 | 3/3 | 3/3 | 42.4 s / 272.4 s | `owid_indicators-heldout-20261018T115856.json` |
 
-Gap list (targets not met, with owner): TODO.
+The reports were written on the team's machine, which reaches Snowflake; they are not committed.
+The T8 data-change answers moved with the data: orders 133,623 to 133,624, a customer balance
+711.56 to 1,711.56, and MACHINERY customers 29,949 to 29,958, each with a new query ID.
+
+Gap list (targets not met, with owner):
+
+- **Latency** (owner: model hosting). Every run misses median 8 s / p95 15 s. Questions take
+  about 5 to 11 s when the hosted Gemma endpoint is quiet; the p95 comes from busy (500/503)
+  or hung calls that are retried. A paid or local endpoint is the fix; see
+  [model-setup.md](model-setup.md).
+- **Faithfulness 37/38 on the tpch_sf1 golden run** (fixed). The miss was T3-03, a negative
+  change rounded half away from zero, which the verifier did not recognise. The verifier now
+  accepts that rounding; the fix landed after this run.
+- **O2-02 on owid_indicators** (fixed). The model wrote REGION = 'AFRICA' where the data has
+  'Africa', giving NO_DATA. An empty result whose filter value differs from a stored value only
+  by case is now rerun once with the stored value, and the answer states the match.
+- **Restricted-role demo** (fixed, to re-run). The first run of `owid_restricted` answered a
+  GDP question it should not see, because the account gave the application user its other
+  roles as secondary roles. Every connection now runs `USE SECONDARY ROLES NONE`.

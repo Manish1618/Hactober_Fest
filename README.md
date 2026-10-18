@@ -135,9 +135,9 @@ tests/                  unit/, adversarial/, integration/
 | 0 Foundations | Skeleton, setup scripts, TPC-H config, model adapter, validator, golden set started, one question end to end | Done |
 | 1 Core pipeline | Classifier, SQL drafting with Gemma, repair loop, answer writer | Done: gate passed on Snowflake (T1 88%, T2 88%, T7 10/10) |
 | 2 Trust features | Query facts, number verifier, evidence panel, edge-case statuses | Done: gate passed on Snowflake (faithfulness 100%, evidence 100%, every status shown) |
-| 3 Evaluation and hardening | Full golden set, runner, model benchmark | Built; offline: 93% golden accuracy and every trust target met; Snowflake gate pending |
-| 4 Reuse and polish | OWID dataset, dataset selector, role demo, UI | Built (OWID config, load script, restricted-role dataset); OWID load on Snowflake pending |
-| 5 Docs and demo | Architecture, model setup, limitations, demo | Docs written (see Documentation); rehearsal pending |
+| 3 Evaluation and hardening | Full golden set, runner, model benchmark | Done on Snowflake: golden 45/45, held-out 19/19, data change 3/3; every target met except latency (see [evaluation](docs/evaluation.md#latest-results)) |
+| 4 Reuse and polish | OWID dataset, dataset selector, role demo, UI | Done: OWID loaded on Snowflake (7 tables), golden 10/11 and held-out 3/3; restricted-role fix to re-run |
+| 5 Docs and demo | Architecture, model setup, limitations, demo | Done: docs written (see Documentation) |
 
 ## Documentation
 
