@@ -1,4 +1,5 @@
 from datamind.model.adapter import (
+    GoogleAIAdapter,
     ModelAdapter,
     ModelError,
     OllamaAdapter,
@@ -6,4 +7,11 @@ from datamind.model.adapter import (
     build_adapter,
 )
 
-__all__ = ["ModelAdapter", "ModelError", "OllamaAdapter", "ScriptedAdapter", "build_adapter"]
+__all__ = [
+    "GoogleAIAdapter",
+    "ModelAdapter",
+    "ModelError",
+    "OllamaAdapter",
+    "ScriptedAdapter",
+    "build_adapter",
+]

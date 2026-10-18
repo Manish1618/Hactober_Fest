@@ -60,6 +60,19 @@ ollama pull gemma3:12b
 Set `DATAMIND_MODEL_ENDPOINT` and `DATAMIND_MODEL_NAME` in `.env` to switch variants or point at
 a remote server. Accept the Gemma Terms of Use where you download the weights.
 
+**Hosted Gemma instead (faster on small laptops).** Put a Google AI Studio key in `.env`:
+
+```bash
+DATAMIND_MODEL_PROVIDER=google
+DATAMIND_MODEL_API_KEY=<your key>
+```
+
+DataMind then calls `gemma-4-26b-a4b-it` on the Gemini API (about 5 to 10 seconds per call) and
+falls back to `gemma-4-31b-it` when Google is busy. Run `datamind smoke` to check the key.
+**Data leaves your machine in this mode** (NFR-15): the question, the schema description and up
+to 20 result rows per answer are sent to Google. SQL still runs only in your Snowflake account,
+and Snowflake credentials are never sent. Switch back with `DATAMIND_MODEL_PROVIDER=ollama`.
+
 ### 3. Check and ask
 
 ```bash
@@ -91,7 +104,7 @@ evaluation/heldout/     held-out questions, never used in prompts or tuning
 snowflake/              repeatable setup scripts
 src/datamind/
   config/               dataset config models and loader
-  model/                Gemma adapter (Ollama), output schemas, versioned prompts
+  model/                Gemma adapters (Ollama, hosted Gemini API), output schemas, prompts
   pipeline/             validator and question pipeline
   snowflake_io/         Snowflake executor, offline DuckDB fixture
   cli.py                datamind check | smoke | ask

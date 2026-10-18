@@ -5,13 +5,14 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import sys
 
 import yaml
 
 from datamind.config import ConfigError, datasets_dir, load_dataset
 from datamind.config.models import DatasetConfig
-from datamind.model.adapter import ModelError, OllamaAdapter, ScriptedAdapter
+from datamind.model.adapter import ModelError, ScriptedAdapter, build_adapter
 from datamind.pipeline.run import Pipeline
 from datamind.pipeline.validator import Catalog, validate
 from datamind.response import Response
@@ -98,7 +99,7 @@ def cmd_smoke(args) -> int:
         print("FAIL snowflake:", e)
         status = 1
     try:
-        print("ok   model:", OllamaAdapter(settings.model).ping())
+        print("ok   model:", build_adapter(settings.model).ping())
     except ModelError as e:
         print("FAIL model:", e)
         status = 1
@@ -150,7 +151,10 @@ def _build(args, settings, cfg, phrase_answers: bool = True) -> Pipeline:
     if provider == "scripted":
         model = ScriptedAdapter(example_responder(cfg))
     else:
-        model = OllamaAdapter(settings.model)
+        if provider != settings.model.provider:  # --model overrides .env: use its defaults
+            os.environ["DATAMIND_MODEL_PROVIDER"] = provider
+            settings.model = get_settings().model
+        model = build_adapter(settings.model)
     if backend == "local":
         from datamind.snowflake_io.fixture import build_fixture
 
@@ -216,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("question")
     a.add_argument("--dataset")
     a.add_argument("--backend", choices=["snowflake", "local"])
-    a.add_argument("--model", choices=["ollama", "scripted"])
+    a.add_argument("--model", choices=["ollama", "google", "scripted"])
     a.add_argument("--json", action="store_true")
     a.set_defaults(func=cmd_ask)
 
@@ -225,7 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--split", choices=["golden", "heldout", "all"], default="golden")
     e.add_argument("--groups", help="comma-separated groups, for example T1,T2,T7")
     e.add_argument("--backend", choices=["snowflake", "local"])
-    e.add_argument("--model", choices=["ollama", "scripted"])
+    e.add_argument("--model", choices=["ollama", "google", "scripted"])
     e.add_argument(
         "--phrase", action="store_true", help="also phrase answers with the model (slower)"
     )

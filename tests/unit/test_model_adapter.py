@@ -65,3 +65,79 @@ def test_unreachable_endpoint_raises_model_error():
 def test_scripted_adapter():
     a = ScriptedAdapter(lambda p, v: {"sql": "SELECT 2"})
     assert a.generate("p", SqlDraft, prompt_version="v1").sql == "SELECT 2"
+
+
+def _google(handler, **kw):
+    from pydantic import SecretStr
+
+    from datamind.model.adapter import GoogleAIAdapter
+
+    settings = ModelSettings(
+        provider="google",
+        endpoint="https://example.test/v1beta",
+        name="gemma-a",
+        api_key=SecretStr("k"),
+        fallback_models=["gemma-b"],
+        **kw,
+    )
+    a = GoogleAIAdapter(settings, client=httpx.Client(transport=httpx.MockTransport(handler)))
+    a.backoff_seconds = 0
+    return a
+
+
+def _reply(text, thought="thinking about it"):
+    return {
+        "candidates": [{"content": {"parts": [{"text": thought, "thought": True}, {"text": text}]}}]
+    }
+
+
+def test_google_adapter_drops_thoughts_and_fences():
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, json=_reply('```json\n{"sql": "SELECT 1"}\n```'))
+
+    a = _google(handler)
+    assert a.generate("p", SqlDraft, prompt_version="v1").sql == "SELECT 1"
+    assert seen[0].headers["x-goog-api-key"] == "k"
+    assert "k" not in str(seen[0].url)  # the key never goes in the URL
+    assert seen[0].url.path.endswith("/models/gemma-a:generateContent")
+
+
+def test_google_adapter_retries_busy_then_falls_back():
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        if "gemma-a" in request.url.path:
+            return httpx.Response(503, json={"error": {"message": "high demand"}})
+        return httpx.Response(200, json=_reply('{"sql": "SELECT 2"}'))
+
+    assert _google(handler).generate("p", SqlDraft, prompt_version="v1").sql == "SELECT 2"
+    assert sum("gemma-a" in c for c in calls) == 3 and "gemma-b" in calls[-1]
+
+
+def test_google_adapter_does_not_retry_a_bad_key():
+    def handler(request):
+        return httpx.Response(403, json={"error": {"message": "API key not valid"}})
+
+    with pytest.raises(ModelError, match="refused"):
+        _google(handler).generate("p", SqlDraft, prompt_version="v1")
+
+
+def test_google_adapter_needs_a_key():
+    from datamind.model.adapter import GoogleAIAdapter
+
+    with pytest.raises(ModelError, match="DATAMIND_MODEL_API_KEY"):
+        GoogleAIAdapter(ModelSettings(provider="google"))
+
+
+def test_api_key_is_hidden_in_settings_output(monkeypatch):
+    from datamind.settings import get_settings
+
+    monkeypatch.setenv("DATAMIND_MODEL_PROVIDER", "google")
+    monkeypatch.setenv("DATAMIND_MODEL_API_KEY", "secret-value")
+    s = get_settings()
+    assert s.model.name == "gemma-4-26b-a4b-it"
+    assert "secret-value" not in repr(s) and "secret-value" not in str(s.redacted())
