@@ -60,6 +60,7 @@ OWID_COUNTRY_CODES = {
     "OWID_SRM",  # Serbia and Montenegro
 }
 CODE_WIDTH = 8  # COUNTRY_CODE is VARCHAR(8)
+FIRST_YEAR, LAST_YEAR = 1, 9999  # YEAR is NUMBER(4); population estimates reach back to -10000
 
 
 class LoadError(Exception):
@@ -124,6 +125,7 @@ def reshape(csv_text: str, table: str) -> tuple[pd.DataFrame, pd.DataFrame, str]
         }
     )
     values = values.dropna(subset=["YEAR", "VALUE"]).astype({"YEAR": "int64"})
+    values = values[values["YEAR"].between(FIRST_YEAR, LAST_YEAR)]
     values = values.drop_duplicates(["COUNTRY_CODE", "YEAR"]).reset_index(drop=True)
 
     # OWID puts the region on one row per country only; take the first non-empty one.

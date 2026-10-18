@@ -99,3 +99,9 @@ def test_reshape_shortens_overlong_aggregate_codes(loader):
     assert "IND" in codes and all(len(c) <= loader.CODE_WIDTH for c in codes)
     eu = countries[countries["COUNTRY_NAME"] == "European Union (27)"].iloc[0]
     assert eu["IS_AGGREGATE"] and eu["COUNTRY_CODE"].startswith("AGG")
+
+
+def test_reshape_drops_years_before_the_common_era(loader):
+    csv = "Entity,Code,Year,Population\nIndia,IND,-10000,1000\nIndia,IND,2020,1380000000\n"
+    values, _, _ = loader.reshape(csv, "POPULATION")
+    assert list(values["YEAR"]) == [2020]
