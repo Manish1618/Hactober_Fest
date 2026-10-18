@@ -1,0 +1,110 @@
+# Golden test set for the Our World in Data indicators (PRD 9.2, section 13).
+#
+# ground_truth_sql is hand-written and reviewed by a person, never produced by Gemma. Each one
+# also runs on the offline OWID fixture (src/datamind/snowflake_io/fixture.py).
+# "Countries" always excludes aggregates (IS_AGGREGATE = FALSE), as the dataset defaults say.
+dataset: owid_indicators
+split: dev
+questions:
+  # ---------- T1: simple lookups ----------
+  - id: O1-01
+    group: T1
+    question: What was the population of Brazil in 2010?
+    expected_status: ANSWERED
+    ground_truth_sql: |
+      SELECT p.VALUE FROM POPULATION p JOIN COUNTRY c ON p.COUNTRY_CODE = c.COUNTRY_CODE
+      WHERE c.COUNTRY_NAME = 'Brazil' AND p.YEAR = 2010 AND p.IS_PROJECTED = FALSE
+  - id: O1-02
+    group: T1
+    question: What was the world's life expectancy in 2015?
+    expected_status: ANSWERED
+    notes: The World aggregate is named, so it is used.
+    ground_truth_sql: |
+      SELECT l.VALUE FROM LIFE_EXPECTANCY l JOIN COUNTRY c ON l.COUNTRY_CODE = c.COUNTRY_CODE
+      WHERE c.COUNTRY_NAME = 'World' AND l.YEAR = 2015
+
+  # ---------- T2: rankings ----------
+  - id: O2-01
+    group: T2
+    question: Which five countries had the highest life expectancy in 2019?
+    expected_status: ANSWERED
+    order_matters: true
+    ground_truth_sql: |
+      SELECT c.COUNTRY_NAME, l.VALUE
+      FROM LIFE_EXPECTANCY l JOIN COUNTRY c ON l.COUNTRY_CODE = c.COUNTRY_CODE
+      WHERE l.YEAR = 2019 AND c.IS_AGGREGATE = FALSE AND l.IS_PROJECTED = FALSE
+      ORDER BY l.VALUE DESC
+      LIMIT 5
+  - id: O2-02
+    group: T2
+    question: Which three African countries had the lowest GDP per capita in 2010?
+    expected_status: ANSWERED
+    order_matters: true
+    ground_truth_sql: |
+      SELECT c.COUNTRY_NAME, g.VALUE
+      FROM GDP_PER_CAPITA g JOIN COUNTRY c ON g.COUNTRY_CODE = c.COUNTRY_CODE
+      WHERE g.YEAR = 2010 AND c.REGION = 'Africa' AND c.IS_AGGREGATE = FALSE
+      ORDER BY g.VALUE ASC
+      LIMIT 3
+
+  # ---------- T3: analysis ----------
+  - id: O3-01
+    group: T3
+    question: What is the correlation between GDP per capita and years of schooling across countries in 2015?
+    expected_status: ANSWERED
+    ground_truth_sql: |
+      SELECT CORR(g.VALUE, s.VALUE)
+      FROM GDP_PER_CAPITA g
+      JOIN YEARS_OF_SCHOOLING s ON g.COUNTRY_CODE = s.COUNTRY_CODE AND g.YEAR = s.YEAR
+      JOIN COUNTRY c ON g.COUNTRY_CODE = c.COUNTRY_CODE
+      WHERE g.YEAR = 2015 AND c.IS_AGGREGATE = FALSE
+  - id: O3-02
+    group: T3
+    question: Which countries have no life expectancy data for 2020?
+    expected_status: ANSWERED
+    notes: A missing-data question; the answer is the list of countries with no 2020 row.
+    ground_truth_sql: |
+      SELECT c.COUNTRY_NAME FROM COUNTRY c
+      WHERE c.IS_AGGREGATE = FALSE
+        AND c.COUNTRY_CODE NOT IN (SELECT COUNTRY_CODE FROM LIFE_EXPECTANCY WHERE YEAR = 2020)
+  - id: O3-03
+    group: T3
+    question: By how many years did life expectancy in India rise between 2000 and 2020?
+    expected_status: ANSWERED
+    ground_truth_sql: |
+      SELECT MAX(CASE WHEN l.YEAR = 2020 THEN l.VALUE END)
+           - MAX(CASE WHEN l.YEAR = 2000 THEN l.VALUE END)
+      FROM LIFE_EXPECTANCY l JOIN COUNTRY c ON l.COUNTRY_CODE = c.COUNTRY_CODE
+      WHERE c.COUNTRY_NAME = 'India'
+
+  # ---------- T6: traps ----------
+  - id: O6-01
+    group: T6
+    question: Which are the five richest countries in the latest year?
+    expected_status: ANSWERED
+    ambiguous: true
+    order_matters: true
+    expected_assumption: richest means highest GDP per capita
+    notes: Defaults define richest as GDP per capita; the latest GDP year in the fixture is 2022.
+    ground_truth_sql: |
+      SELECT c.COUNTRY_NAME, g.VALUE
+      FROM GDP_PER_CAPITA g JOIN COUNTRY c ON g.COUNTRY_CODE = c.COUNTRY_CODE
+      WHERE c.IS_AGGREGATE = FALSE AND g.IS_PROJECTED = FALSE
+        AND g.YEAR = (SELECT MAX(YEAR) FROM GDP_PER_CAPITA WHERE IS_PROJECTED = FALSE)
+      ORDER BY g.VALUE DESC
+      LIMIT 5
+  - id: O6-02
+    group: T6
+    question: What was life expectancy in Atlantis in 2019?
+    expected_status: NO_DATA
+  - id: O6-03
+    group: T6
+    question: What will GDP per capita in Nigeria be in 2040?
+    expected_status: UNSUPPORTED
+    notes: A forecast; the data holds no GDP projections.
+  - id: O6-04
+    group: T6
+    question: Which countries are doing best?
+    expected_status: CLARIFY
+    ambiguous: true
+    notes: No default for "doing best"; any of the five indicators gives a different ranking.

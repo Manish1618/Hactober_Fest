@@ -40,9 +40,9 @@ def get_pipeline(dataset: str) -> Pipeline:
     settings = get_settings()
     cfg = load_dataset(dataset)
     if settings.backend == "local":
-        from datamind.snowflake_io.fixture import build_fixture
+        from datamind.snowflake_io.fixture import build_fixture_for
 
-        executor = LocalExecutor(build_fixture())
+        executor = LocalExecutor(build_fixture_for(cfg))
     else:
         executor = SnowflakeExecutor(settings.snowflake, cfg)
     return Pipeline(cfg, build_adapter(settings.model), executor, max_rows=settings.max_rows)

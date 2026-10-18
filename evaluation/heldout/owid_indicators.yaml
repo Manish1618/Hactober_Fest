@@ -1,0 +1,30 @@
+# Held-out split (FR-K2). Never used in prompts, examples or tuning. Run only to report accuracy.
+dataset: owid_indicators
+split: heldout
+questions:
+  - id: OH1-01
+    group: T1
+    question: What were Japan's CO2 emissions per person in 2018?
+    expected_status: ANSWERED
+    ground_truth_sql: |
+      SELECT e.VALUE FROM CO2_PER_CAPITA e JOIN COUNTRY c ON e.COUNTRY_CODE = c.COUNTRY_CODE
+      WHERE c.COUNTRY_NAME = 'Japan' AND e.YEAR = 2018
+  - id: OH2-01
+    group: T2
+    question: Which three countries emitted the most CO2 per person in 2016?
+    expected_status: ANSWERED
+    order_matters: true
+    ground_truth_sql: |
+      SELECT c.COUNTRY_NAME, e.VALUE
+      FROM CO2_PER_CAPITA e JOIN COUNTRY c ON e.COUNTRY_CODE = c.COUNTRY_CODE
+      WHERE e.YEAR = 2016 AND c.IS_AGGREGATE = FALSE
+      ORDER BY e.VALUE DESC
+      LIMIT 3
+  - id: OH3-01
+    group: T3
+    question: How many countries had more than 100 million people in 2022?
+    expected_status: ANSWERED
+    ground_truth_sql: |
+      SELECT COUNT(*) FROM POPULATION p JOIN COUNTRY c ON p.COUNTRY_CODE = c.COUNTRY_CODE
+      WHERE p.YEAR = 2022 AND p.VALUE > 100000000 AND c.IS_AGGREGATE = FALSE
+        AND p.IS_PROJECTED = FALSE
