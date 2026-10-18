@@ -54,6 +54,7 @@ class ModelSettings(BaseModel):
     max_tokens: int = 1024
     api_key: SecretStr = SecretStr("")
     fallback_models: list[str] = Field(default_factory=list)
+    thinking: bool = False  # hosted Gemma: let the model reason before replying (much slower)
 
 
 class Settings(BaseModel):
@@ -98,6 +99,7 @@ def _model_settings() -> ModelSettings:
         max_tokens=max_tokens,
         api_key=SecretStr(_env("DATAMIND_MODEL_API_KEY", "")),
         fallback_models=[m.strip() for m in fallback.split(",") if m.strip() and m.strip() != name],
+        thinking=_env("DATAMIND_MODEL_THINKING", "off").lower() in ("on", "true", "1"),
     )
 
 

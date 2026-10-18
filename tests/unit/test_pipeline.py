@@ -58,9 +58,12 @@ def test_answers_with_evidence(tpch, fixture_db):
     assert ev.rows_returned == 1 and ev.columns == ["revenue"]
     assert ev.tables == ["LINEITEM", "ORDERS"]
     assert "LIMIT 100" in ev.sql
-    assert ev.prompt_versions == ["understand_v2", "draft_sql_v2", "answer_v1"]
+    assert ev.prompt_versions == ["understand_v3", "draft_sql_v2", "answer_v2"]
     assert ev.data_latest_date.startswith("1998")
-    assert resp.assumptions == ["assumed"]
+    assert resp.assumptions == ["assumed", "Dates used: 1994-01-01 to 1994-12-31 (O_ORDERDATE)."]
+    assert "1994-01-01 to 1994-12-31" in resp.explanation
+    assert ev.verification.startswith("passed")
+    assert "ORDERS.O_ORDERDATE" in ev.columns_used and ev.query_facts[0].startswith("Tables:")
 
     truth = fixture_db.execute(
         "SELECT SUM(L_EXTENDEDPRICE * (1 - L_DISCOUNT)) FROM LINEITEM JOIN ORDERS "
@@ -209,3 +212,103 @@ def test_overlong_question_is_refused(tpch, fixture_db):
 def test_control_characters_are_removed(tpch, fixture_db):
     resp = run(tpch, fixture_db, "SELECT COUNT(*) FROM REGION", "how\x00 many\tregions?")
     assert resp.evidence.question_as_understood == "how many regions?"
+
+
+def test_missing_value_gives_no_data_with_valid_values(tpch, fixture_db):
+    resp = run(
+        tpch,
+        fixture_db,
+        "SELECT COUNT(*) AS n FROM CUSTOMER JOIN NATION ON C_NATIONKEY = N_NATIONKEY "
+        "WHERE N_NAME = 'ATLANTIS'",
+        "How many customers are in Atlantis?",
+    )
+    assert resp.status is Status.NO_DATA or resp.evidence.rows[0][0] == 0
+
+
+def test_empty_filter_explains_the_missing_value(tpch, fixture_db):
+    resp = run(
+        tpch,
+        fixture_db,
+        "SELECT C_NAME FROM CUSTOMER JOIN NATION ON C_NATIONKEY = N_NATIONKEY "
+        "WHERE N_NAME = 'ATLANTIS'",
+        "Show customers in Atlantis",
+    )
+    assert resp.status is Status.NO_DATA
+    assert "ATLANTIS" in resp.reason and "Values that exist include" in resp.reason
+    assert resp.suggestions and "Atlantis" not in resp.suggestions[0]
+
+
+def test_empty_date_range_reports_coverage(tpch, fixture_db):
+    resp = run(
+        tpch,
+        fixture_db,
+        "SELECT O_ORDERKEY FROM ORDERS WHERE O_ORDERDATE >= '2005-01-01' "
+        "AND O_ORDERDATE < '2006-01-01'",
+        "Orders in 2005",
+    )
+    assert resp.status is Status.NO_DATA
+    assert "the data covers ORDERS.O_ORDERDATE from 1992" in resp.reason
+
+
+def test_model_explanation_missing_a_fact_is_replaced(tpch, fixture_db):
+    resp = run(
+        tpch,
+        fixture_db,
+        "SELECT COUNT(*) AS n FROM CUSTOMER WHERE C_MKTSEGMENT = 'BUILDING'",
+        "How many BUILDING customers?",
+        answer={"answer": "There are {r1.n} such customers.", "explanation": "I counted rows."},
+    )
+    assert resp.answer.startswith("There are ")
+    assert "BUILDING" in resp.explanation
+    assert "replaced" in resp.evidence.verification
+
+
+def test_model_explanation_with_invented_number_is_replaced(tpch, fixture_db):
+    resp = run(
+        tpch,
+        fixture_db,
+        "SELECT COUNT(*) AS n FROM CUSTOMER WHERE C_MKTSEGMENT = 'BUILDING'",
+        "How many BUILDING customers?",
+        answer={"answer": "{r1.n}.", "explanation": "Counted BUILDING customers, about 300."},
+    )
+    assert "300" not in resp.explanation
+
+
+def test_non_english_question_is_unsupported(tpch):
+    resp = Pipeline(tpch, scripted("SELECT 1"), Exploding()).ask("¿Cuántos clientes hay?")
+    assert resp.status is Status.UNSUPPORTED
+    assert "English" in resp.reason
+
+
+def test_snowflake_outage_is_an_error_without_repairs(tpch):
+    from datamind.snowflake_io.executor import BackendUnavailable
+
+    class Down:
+        backend = "snowflake"
+
+        def run(self, *a, **k):
+            raise BackendUnavailable("Could not connect to Snowflake")
+
+    calls = []
+    resp = Pipeline(tpch, scripted("SELECT 1 FROM REGION", calls=calls), Down()).ask("q")
+    assert resp.status is Status.ERROR
+    assert "not reachable" in resp.reason
+    assert len([v for v, _ in calls if v.startswith("draft")]) == 1
+
+
+def test_error_keeps_the_last_rejected_sql(tpch, fixture_db):
+    resp = run(tpch, fixture_db, "SELECT NOPE FROM NATION", "q")
+    assert resp.status is Status.ERROR
+    assert "NOPE" in resp.evidence.rejected_sql
+
+
+def test_total_over_no_rows_is_no_data(tpch, fixture_db):
+    resp = run(
+        tpch,
+        fixture_db,
+        "SELECT SUM(O_TOTALPRICE) AS total FROM ORDERS JOIN CUSTOMER ON O_CUSTKEY = C_CUSTKEY "
+        "JOIN NATION ON C_NATIONKEY = N_NATIONKEY WHERE N_NAME = 'ATLANTIS'",
+        "Show sales for Atlantis.",
+    )
+    assert resp.status is Status.NO_DATA
+    assert "ATLANTIS" in resp.reason

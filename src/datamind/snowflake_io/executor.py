@@ -22,6 +22,14 @@ class ExecutionError(Exception):
     """The query failed to run. The message is safe to show and to feed to a repair step."""
 
 
+class BackendUnavailable(ExecutionError):
+    """Snowflake could not be reached or is not configured. Repairing the SQL will not help."""
+
+
+class QueryTimeout(ExecutionError):
+    """The query ran past the statement timeout."""
+
+
 @dataclass
 class QueryResult:
     columns: list[str]
@@ -60,7 +68,7 @@ class SnowflakeExecutor:
         if self._conn is not None and not self._conn.is_closed():
             return self._conn
         if not self.settings.configured:
-            raise ExecutionError(
+            raise BackendUnavailable(
                 "Snowflake is not configured. Set SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER and "
                 "SNOWFLAKE_PRIVATE_KEY_PATH in .env."
             )
@@ -85,7 +93,9 @@ class SnowflakeExecutor:
         try:
             self._conn = snowflake.connector.connect(**params)
         except Exception as e:  # connector raises many types; none should crash the app
-            raise ExecutionError(f"Could not connect to Snowflake: {type(e).__name__}: {e}") from e
+            raise BackendUnavailable(
+                f"Could not connect to Snowflake: {type(e).__name__}: {e}"
+            ) from e
         return self._conn
 
     def run(self, sql: str, *, request_id: str, max_rows: int) -> QueryResult:
@@ -100,6 +110,8 @@ class SnowflakeExecutor:
             columns = [d[0] for d in cur.description or []]
             query_id = cur.sfqid
         except Exception as e:
+            if getattr(e, "errno", None) == 604 or "timeout" in str(e).lower():
+                raise QueryTimeout(f"The query took longer than the time limit: {e}") from e
             raise ExecutionError(f"Snowflake rejected the query: {e}") from e
         finally:
             cur.close()
@@ -137,7 +149,7 @@ class LocalExecutor:
         started = time.perf_counter()
         try:
             local_sql = sqlglot.transpile(sql, read="snowflake", write="duckdb")[0]
-            cur = self._conn.execute(local_sql)
+            cur = self._conn.cursor().execute(local_sql)  # own cursor: safe across threads
             rows = cur.fetchmany(max_rows + 1)
             columns = [d[0] for d in cur.description or []]
         except Exception as e:

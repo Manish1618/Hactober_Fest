@@ -67,8 +67,9 @@ DATAMIND_MODEL_PROVIDER=google
 DATAMIND_MODEL_API_KEY=<your key>
 ```
 
-DataMind then calls `gemma-4-26b-a4b-it` on the Gemini API (about 5 to 10 seconds per call) and
-falls back to `gemma-4-31b-it` when Google is busy. Run `datamind smoke` to check the key.
+DataMind then calls `gemma-4-26b-a4b-it` on the Gemini API (about 5 seconds per call, because
+the model's step-by-step thinking is turned off; `DATAMIND_MODEL_THINKING=on` allows it at about
+ten times the time) and falls back to `gemma-4-31b-it` when Google is busy. Run `datamind smoke` to check the key.
 **Data leaves your machine in this mode** (NFR-15): the question, the schema description and up
 to 20 result rows per answer are sent to Google. SQL still runs only in your Snowflake account,
 and Snowflake credentials are never sent. Switch back with `DATAMIND_MODEL_PROVIDER=ollama`.
@@ -79,7 +80,22 @@ and Snowflake credentials are never sent. Switch back with `DATAMIND_MODEL_PROVI
 datamind check                     # dataset config + golden SQL through the validator
 datamind smoke                     # Snowflake and model connections, reported separately
 datamind ask "What was total revenue in 1995?"
+datamind statuses                  # one example of every response status
+datamind eval --groups T1,T2,T7    # golden set accuracy (add --phrase --trust for phase 2 checks)
 ```
+
+### 4. Interface
+
+```bash
+pip install -e ".[ui]"
+datamind ui                        # opens the Streamlit app on http://localhost:8501
+```
+
+Each answer card shows the status, the answer, assumption chips and a plain-language
+explanation, with a collapsed **Evidence** section: the question as understood, the exact SQL,
+the Snowflake query ID, run details, the first 50 rows, the query facts read from the SQL,
+tables and columns used, the data's date coverage, the model and prompt versions, the answer
+check result and any limits. Evidence downloads as JSON.
 
 Offline (no Snowflake, no model), using a tiny synthetic fixture and a scripted stub that only
 knows the questions in `datasets/tpch_sf1/examples.yaml`:
@@ -105,9 +121,11 @@ snowflake/              repeatable setup scripts
 src/datamind/
   config/               dataset config models and loader
   model/                Gemma adapters (Ollama, hosted Gemini API), output schemas, prompts
-  pipeline/             validator and question pipeline
+  pipeline/             guard, validator, query facts, verifier, answer writer, pipeline
+  evaluation/           golden-set runner: accuracy, faithfulness, evidence completeness
   snowflake_io/         Snowflake executor, offline DuckDB fixture
-  cli.py                datamind check | smoke | ask
+  ui/                   Streamlit interface
+  cli.py                datamind check | smoke | ask | eval | statuses | ui
 tests/                  unit/, adversarial/, integration/
 ```
 
@@ -115,9 +133,9 @@ tests/                  unit/, adversarial/, integration/
 
 | Phase | Scope | State |
 | --- | --- | --- |
-| 0 Foundations | Skeleton, setup scripts, TPC-H config, model adapter, validator, golden set started, one question end to end | Done offline; live Snowflake and Gemma pending credentials |
-| 1 Core pipeline | Classifier, SQL drafting with Gemma, repair loop, answer writer | Not started |
-| 2 Trust features | Query facts, number verifier, evidence panel, edge-case statuses | Not started |
+| 0 Foundations | Skeleton, setup scripts, TPC-H config, model adapter, validator, golden set started, one question end to end | Done |
+| 1 Core pipeline | Classifier, SQL drafting with Gemma, repair loop, answer writer | Done: gate passed on Snowflake (T1 88%, T2 88%, T7 10/10) |
+| 2 Trust features | Query facts, number verifier, evidence panel, edge-case statuses | In progress |
 | 3 Evaluation and hardening | Full golden set, runner, model benchmark | Not started |
 | 4 Reuse and polish | OWID dataset, dataset selector, role demo, UI | Not started |
 | 5 Docs and demo | Architecture, model setup, limitations, demo | Not started |

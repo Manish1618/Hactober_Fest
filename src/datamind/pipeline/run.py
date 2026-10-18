@@ -26,14 +26,17 @@ from datamind.model.prompts import (
 )
 from datamind.model.schemas import AnswerDraft, SqlDraft, Understanding
 from datamind.pipeline.answer import (
+    explain,
     fill_placeholders,
     result_summary,
     stray_numbers,
     template_answer,
 )
 from datamind.pipeline.context import Conversation, Turn
+from datamind.pipeline.facts import QueryFacts, extract_facts
 from datamind.pipeline.guards import unsafe_reason
 from datamind.pipeline.validator import Catalog, validate
+from datamind.pipeline.verify import untraced_numbers, verify
 from datamind.response import (
     EVIDENCE_ROWS,
     MAX_QUESTION_CHARS,
@@ -42,7 +45,13 @@ from datamind.response import (
     Response,
     Status,
 )
-from datamind.snowflake_io.executor import ExecutionError, Executor, QueryResult
+from datamind.snowflake_io.executor import (
+    BackendUnavailable,
+    ExecutionError,
+    Executor,
+    QueryResult,
+    QueryTimeout,
+)
 
 log = logging.getLogger("datamind")
 
@@ -87,33 +96,52 @@ class Pipeline:
             joins=dataset.join_pairs(),
         )
         self._latest_date: str | None = None
+        self._coverage = ""
+        self.date_columns = {
+            f"{t}.{c}"
+            for t, table in dataset.tables.items()
+            for c, col in table.columns.items()
+            if (col.type or "").upper() in ("DATE", "TIMESTAMP", "TIMESTAMP_NTZ")
+        }
 
     # ---- helpers -------------------------------------------------------------------------
+
+    def _read_coverage(self) -> None:
+        t = self.dataset.time
+        self._latest_date, self._coverage = "unknown", ""
+        if not t:
+            return
+        try:
+            r = self.executor.run(
+                f"SELECT MIN({t.anchor_column}), MAX({t.anchor_column}) FROM {t.anchor_table}",
+                request_id="time-anchor",
+                max_rows=1,
+            )
+        except ExecutionError as e:
+            log.warning("could not read the data's date range: %s", e)
+            return
+        if r.rows and r.rows[0][1] is not None:
+            first, last = (str(_cell(v)) for v in r.rows[0])
+            self._latest_date = last
+            self._coverage = f"{t.anchor_table}.{t.anchor_column} from {first} to {last}"
 
     def latest_date(self) -> str:
         """Latest value of the configured time column; anchors relative dates (FR-A4)."""
         if self._latest_date is None:
-            t = self.dataset.time
-            self._latest_date = "unknown"
-            if t:
-                try:
-                    r = self.executor.run(
-                        f"SELECT MAX({t.anchor_column}) FROM {t.anchor_table}",
-                        request_id="time-anchor",
-                        max_rows=1,
-                    )
-                    if r.rows and r.rows[0][0] is not None:
-                        self._latest_date = str(_cell(r.rows[0][0]))
-                except ExecutionError as e:
-                    log.warning("could not read latest date: %s", e)
-        return self._latest_date
+            self._read_coverage()
+        return self._latest_date or "unknown"
+
+    def coverage(self) -> str:
+        self.latest_date()
+        return self._coverage
 
     def _draft_and_run(
         self, question: str, request_id: str, evidence: Evidence
-    ) -> tuple[SqlDraft | None, QueryResult | None, str, str]:
+    ) -> tuple[SqlDraft | None, QueryResult | None, str, str, bool]:
         """Draft, validate and execute with up to MAX_REPAIRS repairs.
 
-        Returns (draft, result, failure_code, failure_reason). result is None on failure.
+        Returns (draft, result, failure_code, failure_reason, limit_added); result is None on
+        failure. BackendUnavailable and QueryTimeout propagate: new SQL will not fix them.
         """
         failed: list[tuple[str, str]] = []
         draft: SqlDraft | None = None
@@ -128,8 +156,9 @@ class Pipeline:
             if not checked.ok:
                 code, reason = checked.code, checked.reason
                 evidence.limits.append(f"Rejected SQL ({checked.code}): {checked.reason}")
+                evidence.rejected_sql = draft.sql
                 if code in _UNSAFE_CODES:
-                    return draft, None, code, reason  # never "repair" an unsafe draft
+                    return draft, None, code, reason, False  # never "repair" an unsafe draft
                 failed.append((draft.sql, reason))
                 evidence.repair_attempts = attempt + 1 if attempt < MAX_REPAIRS else attempt
                 continue
@@ -139,35 +168,106 @@ class Pipeline:
                 result = self.executor.run(
                     checked.sql, request_id=request_id, max_rows=self.max_rows
                 )
+            except (BackendUnavailable, QueryTimeout):
+                raise
             except ExecutionError as e:
                 code, reason = "execution_error", str(e)
+                evidence.rejected_sql = checked.sql
+                evidence.sql = ""
                 failed.append((checked.sql, reason))
                 evidence.repair_attempts = attempt + 1 if attempt < MAX_REPAIRS else attempt
                 continue
-            if checked.limit_added and result.row_count >= self.max_rows:
-                evidence.limits.append(f"Only the first {self.max_rows} rows were fetched.")
-            return draft, result, "", ""
-        return draft, None, code, reason
+            evidence.rejected_sql = ""
+            return draft, result, "", "", checked.limit_added
+        return draft, None, code, reason, False
 
-    def _phrase(self, question: str, columns: list[str], rows: list[list], n: int) -> str:
-        fallback = template_answer(columns, rows, n)
+    def _phrase(
+        self,
+        question: str,
+        columns: list[str],
+        rows: list[list],
+        n: int,
+        facts: QueryFacts,
+    ) -> tuple[str, str, str]:
+        """Answer, explanation and verification summary (FR-C1, FR-C2, FR-D2).
+
+        Gemma phrases with placeholders that code fills; the verifier then checks every number
+        and that the explanation covers every key fact. Anything that fails falls back to the
+        code-built text, which is faithful by construction.
+        """
+        shown = rows[:ANSWER_ROWS]
+        code_answer = template_answer(columns, rows, n)
+        code_explanation = explain(facts, self.dataset)
         if not self.phrase_answers:
-            return fallback
+            v = verify(code_answer, code_explanation, question, rows, facts, n, self.dataset)
+            return code_answer, code_explanation, "code-built answer: " + v.summary()
         try:
             out = self.model.generate(
-                render_answer(question, columns, rows[:ANSWER_ROWS], n),
+                render_answer(question, columns, shown, n, facts.lines()),
                 AnswerDraft,
                 prompt_version=ANSWER,
             )
         except ModelError as e:
-            log.warning("answer phrasing failed, using template: %s", e)
-            return fallback
-        filled, missing = fill_placeholders(out.answer, columns, rows[:ANSWER_ROWS])
-        if missing or stray_numbers(out.answer, question) or not filled.strip():
-            # A number the model typed itself, or a bad reference: use the code-only answer.
-            log.info("model answer rejected (missing=%s)", missing)
-            return fallback
-        return filled
+            log.warning("answer phrasing failed, using code-built answer: %s", e)
+            return code_answer, code_explanation, "code-built answer (model unavailable)"
+        answer, unresolved = fill_placeholders(out.answer, columns, shown)
+        answer = answer.strip()
+        explanation = out.explanation.strip()
+        notes = []
+        if unresolved or not answer:
+            answer, notes = code_answer, [f"model answer had bad references {unresolved}"]
+        elif stray_numbers(out.answer, question) and not self._traces(answer, question, rows, n):
+            answer, notes = code_answer, ["model typed its own numbers"]
+        v_expl = verify("", explanation, question, rows, facts, n, self.dataset)
+        if not explanation or not v_expl.passed:
+            notes.append(f"model explanation {v_expl.summary() if explanation else 'empty'}")
+            explanation = code_explanation
+        final = verify(answer, explanation, question, rows, facts, n, self.dataset)
+        if not final.passed:  # should not happen; never show an unverified number
+            notes.append(f"final check {final.summary()}")
+            answer, explanation = code_answer, code_explanation
+            final = verify(answer, explanation, question, rows, facts, n, self.dataset)
+        summary = final.summary()
+        return answer, explanation, summary + (f" (replaced: {'; '.join(notes)})" if notes else "")
+
+    @staticmethod
+    def _traces(answer: str, question: str, rows: list[list], n: int) -> bool:
+        return not untraced_numbers(answer, [v for r in rows for v in r], question, [n, len(rows)])
+
+    def _diagnose_empty(
+        self, facts: QueryFacts, question: str, request_id: str
+    ) -> tuple[str, list[str]]:
+        """Likely cause of an empty result and valid alternatives (FR-E2, EC-03, EC-04)."""
+        for f in facts.filters:
+            if f.op not in ("=", "IN", "LIKE", "ILIKE") or f.column == facts.date_column:
+                continue
+            table, _, col = f.column.rpartition(".")
+            if table not in self.catalog.tables:
+                continue
+            missing = []
+            for value in f.values:
+                if not _exists(self, table, col, value, request_id):
+                    missing.append(value)
+            if not missing:
+                continue
+            valid = _top_values(self, table, col, request_id)
+            cause = f"There is no {col} equal to {', '.join(repr(m) for m in missing)} in {table}."
+            if valid:
+                cause += f" Values that exist include {', '.join(valid[:8])}."
+            suggestions = [
+                _swap(question, missing[0], v) for v in valid[:3] if _swap(question, missing[0], v)
+            ]
+            return cause, suggestions
+        if facts.date_range and self.coverage():
+            return (
+                f"No rows match. The query asked for {facts.date_range[0]} to "
+                f"{facts.date_range[1]}; the data covers {self.coverage()}.",
+                [],
+            )
+        return (
+            "Every filter value exists on its own, but no rows match all of them together.",
+            [],
+        )
 
     # ---- main entry ----------------------------------------------------------------------
 
@@ -218,6 +318,13 @@ class Pipeline:
             return done(
                 Status.UNSUPPORTED,
                 reason=f"Questions are limited to {MAX_QUESTION_CHARS} characters.",
+            )
+
+        if not _looks_english(q):
+            return done(
+                Status.UNSUPPORTED,
+                reason="DataMind only understands questions in English for now.",
+                suggestions=self.dataset.starter_questions[:3],
             )
 
         # 2. Code guard: write requests never reach the model or Snowflake.
@@ -278,11 +385,22 @@ class Pipeline:
 
         # 4-7. Draft, validate, execute, repair.
         evidence.data_latest_date = self.latest_date()
+        evidence.data_coverage = self.coverage()
         evidence.prompt_versions.append(DRAFT_SQL)
         try:
-            draft, result, code, reason = self._draft_and_run(standalone, request_id, evidence)
+            draft, result, code, reason, limit_added = self._draft_and_run(
+                standalone, request_id, evidence
+            )
         except ModelError as e:
             return done(Status.ERROR, reason=f"The language model could not help: {e}")
+        except BackendUnavailable as e:
+            return done(Status.ERROR, reason=f"Snowflake is not reachable right now. {e}")
+        except QueryTimeout:
+            return done(
+                Status.ERROR,
+                reason="The query took longer than the time limit. Try a narrower question, "
+                "for example one year or one region.",
+            )
         assumptions = draft.assumptions if draft else []
         if result is None:
             if code in _UNSAFE_CODES:
@@ -294,6 +412,17 @@ class Pipeline:
                 assumptions=assumptions,
             )
 
+        facts = extract_facts(evidence.sql, self.catalog, self.date_columns, limit_added)
+        evidence.query_facts = facts.lines()
+        evidence.columns_used = facts.columns_used
+        evidence.role = str(result.meta.get("role") or "")
+        evidence.warehouse = str(result.meta.get("warehouse") or "")
+        if facts.date_range:
+            assumptions = [
+                *assumptions,
+                f"Dates used: {facts.date_range[0]} to {facts.date_range[1]} "
+                f"({facts.date_column.split('.')[-1]}).",
+            ]
         evidence.query_id = result.query_id
         evidence.elapsed_seconds = result.elapsed_seconds
         evidence.executed_at = result.executed_at
@@ -301,24 +430,78 @@ class Pipeline:
         evidence.rows_returned = result.row_count
         evidence.rows = [[_cell(v) for v in row] for row in result.rows[:EVIDENCE_ROWS]]
         evidence.rows_shown = len(evidence.rows)
-        if result.truncated:
+        if result.truncated or (limit_added and result.row_count >= self.max_rows):
             evidence.limits.append(f"Only the first {self.max_rows} rows were fetched.")
         if evidence.rows_shown < result.row_count:
             evidence.limits.append(f"Showing {evidence.rows_shown} of {result.row_count} rows.")
 
-        if result.row_count == 0:
+        all_null = result.row_count > 0 and all(v is None for row in result.rows for v in row)
+        if result.row_count == 0 or all_null:
+            if all_null:  # e.g. SUM over no matching rows returns one NULL
+                evidence.limits.append("The query returned only empty (NULL) values.")
+            cause, suggestions = self._diagnose_empty(facts, standalone, request_id)
             return done(
                 Status.NO_DATA,
                 answer="The query ran but no rows matched.",
+                reason=cause,
+                explanation=explain(facts, self.dataset),
                 assumptions=assumptions,
+                suggestions=suggestions,
             )
 
         # 9. Answer: Gemma phrases with placeholders; code fills every number.
-        evidence.prompt_versions.append(ANSWER)
-        answer = self._phrase(standalone, result.columns, evidence.rows, result.row_count)
+        if self.phrase_answers:
+            evidence.prompt_versions.append(ANSWER)
+        answer, explanation, verification = self._phrase(
+            standalone, result.columns, evidence.rows, result.row_count, facts
+        )
+        evidence.verification = verification
         return done(
             Status.ANSWERED,
             answer=answer,
-            explanation="Plain-language explanation from query facts arrives in phase 2.",
+            explanation=explanation,
             assumptions=assumptions,
         )
+
+
+def _looks_english(text: str) -> bool:
+    """EC-15: most letters are Latin letters and the question has some common English words."""
+    letters = [c for c in text if c.isalpha()]
+    if len(letters) < 4:
+        return True
+    if sum(c.isascii() for c in letters) / len(letters) < 0.8:
+        return False
+    words = set(re.findall(r"\w+", text.lower()))
+    foreign = {"cuántos", "cuantos", "qué", "cuál", "quels", "combien", "wie", "viele", "welche"}
+    return not (words & foreign)
+
+
+def _quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _exists(p: Pipeline, table: str, column: str, value: str, request_id: str) -> bool:
+    sql = f"SELECT 1 FROM {table} WHERE {column} = {_quote(value)} LIMIT 1"
+    if not validate(sql, p.catalog).ok:
+        return True
+    try:
+        return bool(p.executor.run(sql, request_id=request_id, max_rows=1).rows)
+    except ExecutionError:
+        return True  # unknown, so do not blame this filter
+
+
+def _top_values(p: Pipeline, table: str, column: str, request_id: str) -> list[str]:
+    sql = f"SELECT {column}, COUNT(*) AS n FROM {table} GROUP BY {column} ORDER BY n DESC LIMIT 10"
+    if not validate(sql, p.catalog).ok:
+        return []
+    try:
+        rows = p.executor.run(sql, request_id=request_id, max_rows=10).rows
+    except ExecutionError:
+        return []
+    return [str(r[0]) for r in rows if r[0] is not None]
+
+
+def _swap(question: str, old: str, new: str) -> str:
+    """The question with the missing value replaced, when the value appears in it."""
+    pattern = re.compile(re.escape(old), re.IGNORECASE)
+    return pattern.sub(new, question, count=1) if pattern.search(question) else ""

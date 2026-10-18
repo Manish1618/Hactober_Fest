@@ -40,6 +40,13 @@ class Evidence(BaseModel):
     licence_note: str = ""
     executed_at: str = ""
     data_latest_date: str = ""
+    data_coverage: str = ""
+    columns_used: list[str] = Field(default_factory=list)
+    query_facts: list[str] = Field(default_factory=list)
+    warehouse: str = ""
+    role: str = ""
+    verification: str = ""
+    rejected_sql: str = ""
     context_used: str = ""
     repair_attempts: int = 0
     model: str = ""

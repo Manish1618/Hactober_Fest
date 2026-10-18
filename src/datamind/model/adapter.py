@@ -107,6 +107,9 @@ class OllamaAdapter:
         return f"{self.settings.name} available at {self.settings.endpoint}"
 
 
+NO_THINKING = "Answer immediately. Do not think or reason before answering; output only the JSON."
+
+
 class GoogleAIAdapter:
     """Hosted Gemma through the Gemini API (generativelanguage.googleapis.com).
 
@@ -143,6 +146,10 @@ class GoogleAIAdapter:
                 "maxOutputTokens": self.settings.max_tokens,
             },
         }
+        if not self.settings.thinking:
+            # Gemma on this API thinks before every reply unless told not to; skipping it cut
+            # a SQL draft from about 60 s to about 5 s with the same SQL in testing.
+            payload["systemInstruction"] = {"parts": [{"text": NO_THINKING}]}
         url = f"{self.settings.endpoint.rstrip('/')}/models/{model}:generateContent"
         try:
             return self._client.post(url, json=payload, headers=self._headers())

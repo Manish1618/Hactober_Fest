@@ -28,6 +28,12 @@ defaults:
     metric: revenue
   - term: sales
     assumption: Sales means revenue (price after discount), not order count.
+  - term: open orders
+    assumption: Open orders means order status 'O' only; partly shipped orders ('P') are not open.
+  - term: shipped
+    assumption: Items shipped in a period are filtered on the ship date (L_SHIPDATE), not the order date.
+  - term: last year
+    assumption: Last year means the last full calendar year before the latest order date in the data.
     metric: revenue
 
 metrics:
@@ -154,4 +160,4 @@ starter_questions:
   - What was total revenue in 1995?
   - Which five customers spent the most, and which country are they in?
   - How did order counts change month by month in 1996?
-  - Which European suppliers supply the most parts?
+  - Which nation in EUROPE has the most customers?

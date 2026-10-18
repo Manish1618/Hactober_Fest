@@ -8,9 +8,9 @@ from typing import Any
 
 from datamind.config.models import DatasetConfig
 
-UNDERSTAND = "understand_v2"
+UNDERSTAND = "understand_v3"
 DRAFT_SQL = "draft_sql_v2"
-ANSWER = "answer_v1"
+ANSWER = "answer_v2"
 
 
 def load_template(name: str) -> str:
@@ -114,9 +114,19 @@ def format_rows(columns: list[str], rows: list[list[Any]]) -> str:
     )
 
 
-def render_answer(question: str, columns: list[str], rows: list[list[Any]], row_count: int) -> str:
+def render_answer(
+    question: str,
+    columns: list[str],
+    rows: list[list[Any]],
+    row_count: int,
+    facts: list[str] | None = None,
+) -> str:
     return _fill(
         load_template(ANSWER),
         trusted={"row_count": str(row_count)},
-        untrusted={"question": question, "rows": format_rows(columns, rows)},
+        untrusted={
+            "question": question,
+            "rows": format_rows(columns, rows),
+            "facts": "\n".join(facts or []) or "(none)",
+        },
     )

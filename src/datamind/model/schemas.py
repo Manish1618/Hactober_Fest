@@ -52,3 +52,6 @@ class AnswerDraft(BaseModel):
         description="One to three plain sentences. Every number is a placeholder such as "
         "{r1.revenue}; never type a number yourself."
     )
+    explanation: str = Field(
+        default="", description="One or two sentences on how the answer was found, from the facts."
+    )

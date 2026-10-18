@@ -14,6 +14,7 @@ import itertools
 import json
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -22,12 +23,30 @@ from typing import Any
 
 from datamind.evaluation.golden import GoldenQuestion, GoldenSet
 from datamind.pipeline.context import Conversation
+from datamind.pipeline.facts import extract_facts
 from datamind.pipeline.run import Pipeline
+from datamind.pipeline.verify import verify
 from datamind.snowflake_io.executor import ExecutionError
 
 FETCH_ROWS = 5000  # enough for every golden result; more rows than this is a failure anyway
 GATE_GROUPS = ("T1", "T2")
 GATE_ACCURACY = 0.60
+# ERROR needs an outage, so `datamind statuses` demonstrates it instead of the golden set.
+TRUST_STATUSES = {"ANSWERED", "CLARIFY", "NO_DATA", "UNSUPPORTED", "BLOCKED"}
+EVIDENCE_FIELDS = (
+    "question_as_understood",
+    "sql",
+    "query_id",
+    "columns",
+    "tables",
+    "query_facts",
+    "dataset",
+    "licence_note",
+    "executed_at",
+    "data_latest_date",
+    "model",
+    "prompt_versions",
+)
 
 
 def _norm(value: Any) -> Any:
@@ -121,6 +140,12 @@ class QuestionResult:
     assumptions: list[str] = field(default_factory=list)
     repair_attempts: int = 0
     seconds: float = 0.0
+    faithful: bool | None = None  # ANSWERED only: every number traces, explanation covers facts
+    evidence_complete: bool | None = None  # ANSWERED and NO_DATA
+    trust_detail: str = ""
+    answer: str = ""
+    explanation: str = ""
+    rejected_sql: str = ""
 
 
 @dataclass
@@ -139,6 +164,20 @@ class EvalReport:
             out[r.group] = (p + r.passed, n + 1)
         return dict(sorted(out.items()))
 
+    def trust(self) -> tuple[bool, str]:
+        """Phase 2 gate: every status seen, 100% faithfulness, 100% evidence completeness."""
+        faithful = [r.faithful for r in self.results if r.faithful is not None]
+        complete = [r.evidence_complete for r in self.results if r.evidence_complete is not None]
+        statuses = sorted({r.status for r in self.results})
+        missing = sorted(TRUST_STATUSES - set(statuses))
+        ok = all(faithful) and all(complete) and not missing
+        summary = (
+            f"faithfulness {sum(faithful)}/{len(faithful)}, "
+            f"evidence {sum(complete)}/{len(complete)}, statuses seen {', '.join(statuses)}"
+            + (f" (missing {', '.join(missing)})" if missing else "")
+        )
+        return ok, summary
+
     def gate(self) -> tuple[bool, str]:
         groups = self.by_group()
         parts, ok = [], True
@@ -156,7 +195,9 @@ class EvalReport:
 
     def to_dict(self) -> dict:
         ok, summary = self.gate()
+        trust_ok, trust_summary = self.trust()
         return {
+            "trust": {"passed": trust_ok, "summary": trust_summary},
             "dataset": self.dataset,
             "split": self.split,
             "backend": self.backend,
@@ -197,6 +238,8 @@ def evaluate_question(
         assumptions=list(resp.assumptions),
         repair_attempts=ev.repair_attempts,
     )
+    res.answer, res.explanation, res.rejected_sql = resp.answer, resp.explanation, ev.rejected_sql
+    _check_trust(pipeline, resp, res)
     if res.status != q.expected_status:
         res.detail = f"expected {q.expected_status}, got {res.status}: {resp.reason}".strip()
     elif q.ground_truth_sql:
@@ -218,12 +261,47 @@ def evaluate_question(
     return res
 
 
+def _check_trust(pipeline: Pipeline, resp, res: QuestionResult) -> None:
+    """Faithfulness and evidence completeness, checked independently of the pipeline's own run."""
+    ev = resp.evidence
+    notes = []
+    if resp.status.value in ("ANSWERED", "NO_DATA"):
+        empty = [f for f in EVIDENCE_FIELDS if not getattr(ev, f)]
+        if resp.status.value == "ANSWERED" and not ev.rows:
+            empty.append("rows")
+        if not resp.explanation:
+            empty.append("explanation")
+        res.evidence_complete = not empty
+        if empty:
+            notes.append(f"evidence missing {', '.join(empty)}")
+    if resp.status.value == "ANSWERED":
+        limit_added = not any(line.startswith("Row limit") for line in ev.query_facts)
+        facts = extract_facts(ev.sql, pipeline.catalog, pipeline.date_columns, limit_added)
+        v = verify(
+            resp.answer,
+            resp.explanation,
+            ev.question_as_understood,
+            ev.rows,
+            facts,
+            ev.rows_returned,
+            pipeline.dataset,
+        )
+        res.faithful = v.passed
+        if not v.passed:
+            notes.append(f"faithfulness {v.summary()}")
+    res.trust_detail = "; ".join(notes)
+
+
 def run_eval(
     pipeline: Pipeline,
     golden: GoldenSet,
     groups: set[str] | None = None,
     progress=None,
+    workers: int = 1,
 ) -> EvalReport:
+    """Run the golden questions. With workers > 1, independent questions run in parallel
+    (a hosted model is network-bound); follow-ups always run after the question they follow.
+    """
     report = EvalReport(
         dataset=golden.dataset,
         split=golden.split,
@@ -231,16 +309,27 @@ def run_eval(
         model=pipeline.model.name,
         started_at=datetime.now(UTC).isoformat(timespec="seconds"),
     )
+    selected = [q for q in golden.questions if not groups or q.group in groups]
+    pipeline.latest_date()  # read once before threads start
     conversations: dict[str, Conversation] = {}
-    for q in golden.questions:
-        if groups and q.group not in groups:
-            continue
+    results: dict[str, QuestionResult] = {}
+
+    def one(q: GoldenQuestion) -> QuestionResult:
         # A follow-up continues the conversation of the question it follows.
-        conv = copy.deepcopy(conversations.get(q.follows, Conversation())) if q.follows else None
-        own = conv if conv is not None else Conversation()
+        base = conversations.get(q.follows) if q.follows else None
+        own = copy.deepcopy(base) if base is not None else Conversation()
         result = evaluate_question(pipeline, q, own)
         conversations[q.id] = own
-        report.results.append(result)
         if progress:
             progress(result)
+        return result
+
+    first = [q for q in selected if not q.follows]
+    later = [q for q in selected if q.follows]
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        for q, r in zip(first, pool.map(one, first), strict=True):
+            results[q.id] = r
+    for q in later:
+        results[q.id] = one(q)
+    report.results = [results[q.id] for q in selected]
     return report

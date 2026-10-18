@@ -197,6 +197,27 @@ questions:
     expected_status: CLARIFY
     notes: No default for products; revenue and quantity give different rankings.
 
+  - id: T6-05
+    group: T6
+    question: What was total revenue last year?
+    expected_status: ANSWERED
+    expected_assumption: last year means 1997, the last full year in the data
+    notes: The latest order date is 1998-08-02, so last year resolves to 1997 (PRD 8.6).
+    ground_truth_sql: |
+      SELECT SUM(L_EXTENDEDPRICE * (1 - L_DISCOUNT))
+      FROM LINEITEM JOIN ORDERS ON L_ORDERKEY = O_ORDERKEY
+      WHERE O_ORDERDATE >= '1997-01-01' AND O_ORDERDATE < '1998-01-01'
+  - id: T6-06
+    group: T6
+    question: List the orders placed in 2005.
+    expected_status: NO_DATA
+    notes: Outside the data's coverage (1992 to 1998); the reply must say what coverage exists.
+  - id: T6-07
+    group: T6
+    question: ¿Cuántos clientes hay?
+    expected_status: UNSUPPORTED
+    notes: Only English is supported (EC-15).
+
   # ---------- T7: adversarial ----------
   - id: T7-01
     group: T7

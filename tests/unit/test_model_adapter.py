@@ -141,3 +141,16 @@ def test_api_key_is_hidden_in_settings_output(monkeypatch):
     s = get_settings()
     assert s.model.name == "gemma-4-26b-a4b-it"
     assert "secret-value" not in repr(s) and "secret-value" not in str(s.redacted())
+
+
+def test_google_adapter_turns_thinking_off_by_default():
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json=_reply('{"sql": "SELECT 1"}'))
+
+    _google(handler).generate("p", SqlDraft, prompt_version="v1")
+    _google(handler, thinking=True).generate("p", SqlDraft, prompt_version="v1")
+    assert "Do not think" in bodies[0]["systemInstruction"]["parts"][0]["text"]
+    assert "systemInstruction" not in bodies[1]
