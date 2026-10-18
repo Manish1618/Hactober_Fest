@@ -1,0 +1,4 @@
+# Few-shot examples for the demo copy. Kept short: the tables are a subset of tpch_sf1.
+examples:
+  - question: How many orders are there?
+    sql: SELECT COUNT(*) AS order_count FROM ORDERS

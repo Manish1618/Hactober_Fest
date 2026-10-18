@@ -1,0 +1,153 @@
+# Role demo (PRD US-14, FR-G4): the OWID dataset read as DATAMIND_RESTRICTED, which may read
+# only COUNTRY and LIFE_EXPECTANCY (snowflake/02_owid_schema.sql). DataMind lists the tables the
+# role can see and hides the rest, so questions about GDP or schooling get a no-access answer.
+# The rest of this file is a copy of datasets/owid_indicators/dataset.yaml.
+# Our World in Data development indicators (PRD 9.2). Second dataset: configuration only.
+# datasets/owid_indicators/download_and_load.py fills DATAMIND_DB.OWID (snowflake/02_owid_schema.sql).
+dataset: owid_restricted
+display_name: World development indicators, restricted role (demo)
+description: >
+  Country-level yearly indicators from Our World in Data: life expectancy, GDP per capita, mean
+  years of schooling, population and CO2 emissions per person. One table per indicator, each with
+  one row per country and year. COUNTRY lists countries and also aggregates such as World and
+  continents.
+licence_note: >
+  Data from Our World in Data (ourworldindata.org), licensed CC BY 4.0. Each indicator's source
+  page and download date are in the ATTRIBUTION table. Cite "Our World in Data" when reusing.
+
+snowflake:
+  database: DATAMIND_DB
+  schema: OWID
+  role: DATAMIND_RESTRICTED
+
+# The anchor is a YEAR number, not a date: coverage and "latest" resolve to a year such as 2023.
+# This role can read only COUNTRY and LIFE_EXPECTANCY, so the anchor is LIFE_EXPECTANCY.
+time:
+  anchor_table: LIFE_EXPECTANCY
+  anchor_column: YEAR
+  note: >
+    Yearly data. Years are whole numbers (YEAR = 2019), not dates. Latest year means the latest
+    year with non-projected data for the indicator asked about.
+
+# Vague terms with an agreed meaning (PRD 8.3).
+defaults:
+  - term: countries
+    assumption: Countries exclude aggregates such as World, continents and income groups (COUNTRY.IS_AGGREGATE = FALSE) unless the question names one.
+  - term: richest
+    assumption: Richest or poorest means GDP per capita (income per person), not total GDP.
+    metric: gdp_per_capita
+  - term: income per person
+    assumption: Income per person means GDP per capita.
+    metric: gdp_per_capita
+  - term: latest year
+    assumption: Latest year means the latest year with non-projected data (IS_PROJECTED = FALSE) for that indicator.
+  - term: education
+    assumption: Education level means mean years of schooling.
+  - term: relationship
+    assumption: A relationship between two indicators is the Pearson correlation (CORR) across countries in the latest year where both have non-projected data.
+  - term: no data
+    assumption: Missing data for a country and year means no row in the indicator's table for that year; without a named indicator, life expectancy is used.
+
+metrics:
+  life_expectancy:
+    description: Life expectancy at birth in years.
+    sql: LIFE_EXPECTANCY.VALUE
+    unit: years
+    synonyms: [life expectancy, lifespan, how long people live]
+  gdp_per_capita:
+    description: GDP per person, in constant international dollars (PPP).
+    sql: GDP_PER_CAPITA.VALUE
+    unit: dollars
+    synonyms: [gdp per capita, income per person, average income, wealth, richest]
+  years_of_schooling:
+    description: Average number of years of schooling of adults aged 25 and over.
+    sql: YEARS_OF_SCHOOLING.VALUE
+    unit: years
+    synonyms: [years of schooling, education, schooling]
+  population:
+    description: Number of people living in the country.
+    sql: POPULATION.VALUE
+    unit: people
+    synonyms: [population, inhabitants, people]
+  co2_per_capita:
+    description: Fossil CO2 emissions per person, in tonnes.
+    sql: CO2_PER_CAPITA.VALUE
+    unit: tonnes
+    synonyms: [co2 per capita, carbon emissions per person, emissions per person]
+
+tables:
+  COUNTRY:
+    description: One row per country or aggregate (World, continents, income groups).
+    columns:
+      COUNTRY_CODE: {type: VARCHAR, description: "ISO 3166-1 alpha-3 code such as JPN; aggregates use OWID_ codes such as OWID_WRL (World)", synonyms: [iso code, code]}
+      COUNTRY_NAME: {type: VARCHAR, description: "Country name as written by Our World in Data, such as United States", synonyms: [country, nation, name]}
+      REGION: {type: VARCHAR, description: "Continent: Africa, Asia, Europe, North America, Oceania or South America. NULL for aggregates", synonyms: [continent, region]}
+      IS_AGGREGATE: {type: BOOLEAN, description: "TRUE for World, continents and other groups of countries; FALSE for single countries"}
+  LIFE_EXPECTANCY:
+    description: Life expectancy at birth, one row per country and year.
+    columns:
+      COUNTRY_CODE: {type: VARCHAR, description: Country or aggregate code (joins to COUNTRY)}
+      YEAR: {type: NUMBER, description: Calendar year as a whole number, synonyms: [year]}
+      VALUE: {type: FLOAT, description: Life expectancy at birth in years, unit: years, synonyms: [life expectancy, lifespan]}
+      IS_PROJECTED: {type: BOOLEAN, description: TRUE for a projection rather than an estimate of the past}
+  GDP_PER_CAPITA:
+    description: GDP per person in constant international dollars (PPP), one row per country and year.
+    columns:
+      COUNTRY_CODE: {type: VARCHAR, description: Country or aggregate code (joins to COUNTRY)}
+      YEAR: {type: NUMBER, description: Calendar year as a whole number, synonyms: [year]}
+      VALUE: {type: FLOAT, description: GDP per capita in international dollars, unit: dollars, synonyms: [gdp per capita, income per person, average income]}
+      IS_PROJECTED: {type: BOOLEAN, description: TRUE for a projection rather than an estimate of the past}
+  YEARS_OF_SCHOOLING:
+    description: Mean years of schooling of adults (25 and over), one row per country and year.
+    columns:
+      COUNTRY_CODE: {type: VARCHAR, description: Country or aggregate code (joins to COUNTRY)}
+      YEAR: {type: NUMBER, description: Calendar year as a whole number, synonyms: [year]}
+      VALUE: {type: FLOAT, description: Mean years of schooling, unit: years, synonyms: [years of schooling, education]}
+      IS_PROJECTED: {type: BOOLEAN, description: TRUE for a projection rather than an estimate of the past}
+  POPULATION:
+    description: Total population, one row per country and year. Includes some projected future years.
+    columns:
+      COUNTRY_CODE: {type: VARCHAR, description: Country or aggregate code (joins to COUNTRY)}
+      YEAR: {type: NUMBER, description: Calendar year as a whole number, synonyms: [year]}
+      VALUE: {type: FLOAT, description: Number of people, unit: people, synonyms: [population, inhabitants]}
+      IS_PROJECTED: {type: BOOLEAN, description: TRUE for a UN projection of a future year; exclude unless projections are asked for}
+  CO2_PER_CAPITA:
+    description: Fossil CO2 emissions per person, one row per country and year.
+    columns:
+      COUNTRY_CODE: {type: VARCHAR, description: Country or aggregate code (joins to COUNTRY)}
+      YEAR: {type: NUMBER, description: Calendar year as a whole number, synonyms: [year]}
+      VALUE: {type: FLOAT, description: CO2 emissions per person in tonnes, unit: tonnes, synonyms: [co2 per capita, emissions per person]}
+      IS_PROJECTED: {type: BOOLEAN, description: TRUE for a projection rather than an estimate of the past}
+  ATTRIBUTION:
+    description: Source and licence of each indicator table (one row per table).
+    columns:
+      TABLE_NAME: {type: VARCHAR, description: "Indicator table the row describes, such as LIFE_EXPECTANCY"}
+      INDICATOR: {type: VARCHAR, description: Indicator name as published by Our World in Data}
+      SOURCE_URL: {type: VARCHAR, description: Our World in Data page the data was downloaded from, synonyms: [source]}
+      LICENCE: {type: VARCHAR, description: "Licence of the data, such as CC BY 4.0", synonyms: [license]}
+      DOWNLOADED_AT: {type: TIMESTAMP_NTZ, description: When the data was downloaded}
+
+joins:
+  - LIFE_EXPECTANCY.COUNTRY_CODE = COUNTRY.COUNTRY_CODE
+  - GDP_PER_CAPITA.COUNTRY_CODE = COUNTRY.COUNTRY_CODE
+  - YEARS_OF_SCHOOLING.COUNTRY_CODE = COUNTRY.COUNTRY_CODE
+  - POPULATION.COUNTRY_CODE = COUNTRY.COUNTRY_CODE
+  - CO2_PER_CAPITA.COUNTRY_CODE = COUNTRY.COUNTRY_CODE
+  # Comparing two indicators matches the same country and year in both tables.
+  - GDP_PER_CAPITA.COUNTRY_CODE = YEARS_OF_SCHOOLING.COUNTRY_CODE
+  - GDP_PER_CAPITA.COUNTRY_CODE = LIFE_EXPECTANCY.COUNTRY_CODE
+  - LIFE_EXPECTANCY.COUNTRY_CODE = YEARS_OF_SCHOOLING.COUNTRY_CODE
+  - CO2_PER_CAPITA.COUNTRY_CODE = GDP_PER_CAPITA.COUNTRY_CODE
+  - POPULATION.COUNTRY_CODE = GDP_PER_CAPITA.COUNTRY_CODE
+
+formats:
+  years: {suffix: " years", decimals: 1}
+  dollars: {prefix: "$", decimals: 0}
+  people: {decimals: 0}
+  tonnes: {suffix: " t", decimals: 2}
+
+starter_questions:
+  - Which five countries had the highest life expectancy in 2019?
+  - Is there a relationship between income per person and years of schooling?
+  - Which countries have no data for 2020?
+  - What was the population of India in 2010?

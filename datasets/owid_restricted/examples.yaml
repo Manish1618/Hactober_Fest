@@ -1,0 +1,12 @@
+# Examples use only the tables DATAMIND_RESTRICTED can read, so hidden tables never appear in
+# the prompt.
+examples:
+  - question: Which three countries in Asia had the lowest life expectancy in 2015?
+    sql: |
+      SELECT c.COUNTRY_NAME AS country, l.VALUE AS life_expectancy
+      FROM LIFE_EXPECTANCY l
+      JOIN COUNTRY c ON l.COUNTRY_CODE = c.COUNTRY_CODE
+      WHERE l.YEAR = 2015 AND c.REGION = 'Asia' AND c.IS_AGGREGATE = FALSE
+        AND l.IS_PROJECTED = FALSE
+      ORDER BY l.VALUE ASC
+      LIMIT 3

@@ -1,0 +1,68 @@
+# Demo copy of two TPC-H tables that DataMind's own account can change (PRD US-12, FR-K5).
+# The data-change test (golden group T8) edits these tables between two identical questions and
+# checks that the answer follows the data. snowflake/03_demo_tables.sql creates them as zero-copy
+# clones of ORDERS_BASE and CUSTOMER_BASE; the test re-clones them before and after each change.
+# The application still reads them only as DATAMIND_READER.
+dataset: tpch_demo
+display_name: Wholesale orders demo copy (changeable)
+description: >
+  A changeable copy of the TPC-H customers and orders, used to show that answers come from the
+  data at question time.
+licence_note: Copied from the TPC-H sample data provided by Snowflake (SNOWFLAKE_SAMPLE_DATA). Synthetic data.
+
+snowflake:
+  database: DATAMIND_DB
+  schema: DEMO
+  role: DATAMIND_READER
+
+time:
+  anchor_table: ORDERS
+  anchor_column: O_ORDERDATE
+  note: Orders run from 1992 to 1998. Relative dates resolve against the latest order date.
+
+defaults:
+  - term: open orders
+    assumption: Open orders means order status 'O' only; partly shipped orders ('P') are not open.
+
+metrics:
+  order_count:
+    description: Number of distinct orders.
+    sql: COUNT(DISTINCT O_ORDERKEY)
+    unit: count
+    synonyms: [order count, number of orders, orders]
+
+tables:
+  CUSTOMER:
+    description: One row per customer.
+    columns:
+      C_CUSTKEY: {type: NUMBER, description: Customer identifier}
+      C_NAME: {type: VARCHAR, description: Customer name such as Customer#000000001, synonyms: [customer, client]}
+      C_ADDRESS: {type: VARCHAR, description: Street address}
+      C_NATIONKEY: {type: NUMBER, description: Nation the customer is in}
+      C_PHONE: {type: VARCHAR, description: Phone number}
+      C_ACCTBAL: {type: NUMBER, description: Account balance, unit: currency, synonyms: [balance]}
+      C_MKTSEGMENT: {type: VARCHAR, description: "Market segment: AUTOMOBILE, BUILDING, FURNITURE, HOUSEHOLD or MACHINERY", synonyms: [segment]}
+      C_COMMENT: {type: VARCHAR, description: Free-text comment}
+  ORDERS:
+    description: One row per customer order.
+    columns:
+      O_ORDERKEY: {type: NUMBER, description: Order identifier}
+      O_CUSTKEY: {type: NUMBER, description: Customer who placed the order}
+      O_ORDERSTATUS: {type: VARCHAR, description: "Status: F fulfilled, O open, P partial", synonyms: [status]}
+      O_TOTALPRICE: {type: NUMBER, description: Total price of the order including tax, unit: currency}
+      O_ORDERDATE: {type: DATE, description: Date the order was placed, synonyms: [order date, date]}
+      O_ORDERPRIORITY: {type: VARCHAR, description: "Priority such as 1-URGENT or 5-LOW", synonyms: [priority]}
+      O_CLERK: {type: VARCHAR, description: Clerk who handled the order}
+      O_SHIPPRIORITY: {type: NUMBER, description: Shipping priority}
+      O_COMMENT: {type: VARCHAR, description: Free-text comment}
+
+joins:
+  - ORDERS.O_CUSTKEY = CUSTOMER.C_CUSTKEY
+
+formats:
+  currency: {prefix: "$", decimals: 2}
+  count: {decimals: 0}
+
+starter_questions:
+  - How many orders were placed in 1998?
+  - What is the account balance of Customer#000000001?

@@ -1,0 +1,11 @@
+DataMind
+Copyright 2026 the DataMind contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Data and models used with this product are not distributed with it:
+- TPC-H sample data is referenced in place from Snowflake's SNOWFLAKE_SAMPLE_DATA database.
+- Our World in Data indicators are downloaded by a script; attribution is kept in the
+  ATTRIBUTION table and in docs. Each indicator keeps its own licence (typically CC BY 4.0).
+- Google Gemma model weights are obtained by each user under the Gemma Terms of Use and
+  are not redistributed here.

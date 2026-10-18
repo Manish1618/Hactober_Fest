@@ -1,0 +1,34 @@
+# Data-change test (PRD T8, US-12, FR-K5) on the changeable demo copy (datasets/tpch_demo).
+# Each question is asked, its change_sql is applied to the demo tables, and the same question is
+# asked again. Both answers must match the ground truth at that moment, and the second answer must
+# come from a new query (new query ID). The tables are re-cloned before and after each test.
+dataset: tpch_demo
+split: dev
+questions:
+  - id: T8-01
+    group: T8
+    question: How many orders were placed in 1998?
+    expected_status: ANSWERED
+    ground_truth_sql: |
+      SELECT COUNT(*) FROM ORDERS
+      WHERE O_ORDERDATE >= '1998-01-01' AND O_ORDERDATE < '1999-01-01'
+    change_sql:
+      - |
+        INSERT INTO ORDERS (O_ORDERKEY, O_CUSTKEY, O_ORDERSTATUS, O_TOTALPRICE, O_ORDERDATE,
+          O_ORDERPRIORITY, O_CLERK, O_SHIPPRIORITY, O_COMMENT)
+        VALUES (99999001, 1, 'O', 1000.00, '1998-07-01', '1-URGENT', 'Clerk#000000001', 0,
+          'DataMind data-change test')
+  - id: T8-02
+    group: T8
+    question: What is the account balance of Customer#000000001?
+    expected_status: ANSWERED
+    ground_truth_sql: SELECT C_ACCTBAL FROM CUSTOMER WHERE C_NAME = 'Customer#000000001'
+    change_sql:
+      - UPDATE CUSTOMER SET C_ACCTBAL = C_ACCTBAL + 1000 WHERE C_CUSTKEY = 1
+  - id: T8-03
+    group: T8
+    question: How many customers are in the MACHINERY segment?
+    expected_status: ANSWERED
+    ground_truth_sql: SELECT COUNT(*) FROM CUSTOMER WHERE C_MKTSEGMENT = 'MACHINERY'
+    change_sql:
+      - UPDATE CUSTOMER SET C_MKTSEGMENT = 'MACHINERY' WHERE C_CUSTKEY <= 10 AND C_MKTSEGMENT <> 'MACHINERY'

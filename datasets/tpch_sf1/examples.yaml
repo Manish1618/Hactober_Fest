@@ -1,0 +1,31 @@
+# Question and SQL pairs shown to Gemma when drafting SQL (FR-B9).
+# Keep these different from evaluation/golden questions so the test set stays honest.
+examples:
+  - question: How many customers are in the BUILDING market segment?
+    sql: |
+      SELECT COUNT(*) AS customer_count
+      FROM CUSTOMER
+      WHERE C_MKTSEGMENT = 'BUILDING'
+  - question: What was total revenue in 1994?
+    sql: |
+      SELECT SUM(L_EXTENDEDPRICE * (1 - L_DISCOUNT)) AS revenue
+      FROM LINEITEM
+      JOIN ORDERS ON L_ORDERKEY = O_ORDERKEY
+      WHERE O_ORDERDATE >= '1994-01-01' AND O_ORDERDATE < '1995-01-01'
+  - question: Which three nations in ASIA have the most customers?
+    sql: |
+      SELECT N_NAME AS nation, COUNT(*) AS customer_count
+      FROM CUSTOMER
+      JOIN NATION ON C_NATIONKEY = N_NATIONKEY
+      JOIN REGION ON N_REGIONKEY = R_REGIONKEY
+      WHERE R_NAME = 'ASIA'
+      GROUP BY N_NAME
+      ORDER BY customer_count DESC
+      LIMIT 3
+  - question: Average order value by order priority in 1993
+    sql: |
+      SELECT O_ORDERPRIORITY AS priority, AVG(O_TOTALPRICE) AS avg_order_value
+      FROM ORDERS
+      WHERE O_ORDERDATE >= '1993-01-01' AND O_ORDERDATE < '1994-01-01'
+      GROUP BY O_ORDERPRIORITY
+      ORDER BY O_ORDERPRIORITY
