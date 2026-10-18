@@ -218,7 +218,8 @@ class EvalReport:
         ]
         complete = [r.evidence_complete for r in self.results if r.evidence_complete is not None]
         statuses = sorted({r.status for r in self.results})
-        expected = {r.expected_status for r in self.results} & TRUST_STATUSES
+        # An ambiguous question may rightly be answered with an assumption instead of CLARIFY.
+        expected = {r.expected_status for r in self.results if not r.ambiguous} & TRUST_STATUSES
         missing = sorted(expected - set(statuses))
         ok = all(faithful) and all(complete) and not missing
         summary = (
