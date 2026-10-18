@@ -169,9 +169,9 @@ def _build(args, settings, cfg, phrase_answers: bool = True) -> Pipeline:
             settings.model = get_settings().model
         model = build_adapter(settings.model)
     if backend == "local":
-        from datamind.snowflake_io.fixture import build_fixture
+        from datamind.snowflake_io.fixture import build_fixture_for
 
-        executor = LocalExecutor(build_fixture())
+        executor = LocalExecutor(build_fixture_for(cfg))
         print("NOTE: local fixture backend. Numbers are synthetic, not from Snowflake.\n")
     else:
         executor = SnowflakeExecutor(settings.snowflake, cfg)

@@ -1,0 +1,36 @@
+# Question and SQL pairs shown to Gemma when drafting SQL (FR-B9).
+# Keep these different from evaluation/golden questions so the test set stays honest.
+examples:
+  - question: Which three countries in Europe had the lowest CO2 emissions per person in 2015?
+    sql: |
+      SELECT c.COUNTRY_NAME AS country, e.VALUE AS co2_per_capita
+      FROM CO2_PER_CAPITA e
+      JOIN COUNTRY c ON e.COUNTRY_CODE = c.COUNTRY_CODE
+      WHERE e.YEAR = 2015 AND c.REGION = 'Europe' AND c.IS_AGGREGATE = FALSE
+        AND e.IS_PROJECTED = FALSE
+      ORDER BY e.VALUE ASC
+      LIMIT 3
+  - question: How did the world population change from 2005 to 2015?
+    sql: |
+      SELECT p.YEAR AS year, p.VALUE AS population
+      FROM POPULATION p
+      JOIN COUNTRY c ON p.COUNTRY_CODE = c.COUNTRY_CODE
+      WHERE c.COUNTRY_NAME = 'World' AND p.YEAR IN (2005, 2015) AND p.IS_PROJECTED = FALSE
+      ORDER BY p.YEAR
+  - question: What is the correlation between life expectancy and CO2 emissions per person in 2012?
+    sql: |
+      SELECT CORR(l.VALUE, e.VALUE) AS correlation, COUNT(*) AS countries
+      FROM LIFE_EXPECTANCY l
+      JOIN CO2_PER_CAPITA e ON l.COUNTRY_CODE = e.COUNTRY_CODE AND l.YEAR = e.YEAR
+      JOIN COUNTRY c ON l.COUNTRY_CODE = c.COUNTRY_CODE
+      WHERE l.YEAR = 2012 AND c.IS_AGGREGATE = FALSE
+        AND l.IS_PROJECTED = FALSE AND e.IS_PROJECTED = FALSE
+  - question: Which countries have no GDP per capita data for 2008?
+    sql: |
+      SELECT c.COUNTRY_NAME AS country
+      FROM COUNTRY c
+      WHERE c.IS_AGGREGATE = FALSE
+        AND c.COUNTRY_CODE NOT IN (
+          SELECT g.COUNTRY_CODE FROM GDP_PER_CAPITA g WHERE g.YEAR = 2008 AND g.IS_PROJECTED = FALSE
+        )
+      ORDER BY c.COUNTRY_NAME
