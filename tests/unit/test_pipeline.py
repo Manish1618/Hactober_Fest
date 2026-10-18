@@ -58,7 +58,7 @@ def test_answers_with_evidence(tpch, fixture_db):
     assert ev.rows_returned == 1 and ev.columns == ["revenue"]
     assert ev.tables == ["LINEITEM", "ORDERS"]
     assert "LIMIT 100" in ev.sql
-    assert ev.prompt_versions == ["understand_v1", "draft_sql_v2", "answer_v1"]
+    assert ev.prompt_versions == ["understand_v2", "draft_sql_v2", "answer_v1"]
     assert ev.data_latest_date.startswith("1998")
     assert resp.assumptions == ["assumed"]
 

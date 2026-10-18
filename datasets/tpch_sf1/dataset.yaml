@@ -97,7 +97,7 @@ tables:
       L_TAX: {type: NUMBER, description: Tax as a fraction, unit: fraction}
       L_RETURNFLAG: {type: VARCHAR, description: "Return flag: R returned, A accepted, N none"}
       L_LINESTATUS: {type: VARCHAR, description: "Line status: O open, F fulfilled"}
-      L_SHIPDATE: {type: DATE, description: Date shipped, synonyms: [ship date]}
+      L_SHIPDATE: {type: DATE, description: "Date the item shipped. Use it for questions about items shipped in a period", synonyms: [ship date, shipped, shipping date]}
       L_COMMITDATE: {type: DATE, description: Date the supplier committed to deliver}
       L_RECEIPTDATE: {type: DATE, description: Date the customer received the item}
       L_SHIPINSTRUCT: {type: VARCHAR, description: Shipping instruction}

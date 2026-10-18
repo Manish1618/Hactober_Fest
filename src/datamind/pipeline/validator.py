@@ -82,11 +82,29 @@ class Catalog:
     tables: dict[str, set[str]]
     database: str | None = None
     schema: str | None = None
+    joins: list[tuple[tuple[str, str], tuple[str, str]]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.tables = {t.upper(): {c.upper() for c in cols} for t, cols in self.tables.items()}
         self.database = self.database.upper() if self.database else None
         self.schema = self.schema.upper() if self.schema else None
+        self.joins = [
+            ((lt.upper(), lc.upper()), (rt.upper(), rc.upper()))
+            for (lt, lc), (rt, rc) in self.joins
+        ]
+        # Key columns that declared joins connect share a class: C_NATIONKEY, S_NATIONKEY and
+        # N_NATIONKEY are one class, O_CUSTKEY and C_CUSTKEY another.
+        parent: dict[tuple[str, str], tuple[str, str]] = {}
+
+        def find(x):
+            parent.setdefault(x, x)
+            while parent[x] != x:
+                x = parent[x]
+            return x
+
+        for a, b in self.joins:
+            parent[find(a)] = find(b)
+        self.key_class = {k: find(k) for k in list(parent)}
 
     def as_sqlglot_schema(self) -> dict[str, dict[str, str]]:
         return {t: {c: "VARCHAR" for c in cols} for t, cols in self.tables.items()}
@@ -108,6 +126,29 @@ def _literal_int(node: exp.Expression | None) -> int | None:
             return int(node.this)
         except ValueError:
             return None
+    return None
+
+
+def _undeclared_key_join(qualified: exp.Expression, catalog: Catalog) -> str | None:
+    """The first column = column comparison that links key columns of different classes."""
+    if not catalog.joins:
+        return None
+    aliases = {t.alias_or_name.upper(): t.name.upper() for t in qualified.find_all(exp.Table)}
+
+    def resolve(col: exp.Column) -> tuple[str, str] | None:
+        table = aliases.get(col.table.upper()) if col.table else None
+        return (table, col.name.upper()) if table else None
+
+    for eq in qualified.find_all(exp.EQ):
+        left, right = eq.this, eq.expression
+        if not (isinstance(left, exp.Column) and isinstance(right, exp.Column)):
+            continue
+        a, b = resolve(left), resolve(right)
+        if not a or not b or a[0] == b[0]:
+            continue
+        ca, cb = catalog.key_class.get(a), catalog.key_class.get(b)
+        if ca and cb and ca != cb:
+            return f"{a[0]}.{a[1]} = {b[0]}.{b[1]}"
     return None
 
 
@@ -199,7 +240,18 @@ def validate(sql: str, catalog: Catalog, max_rows: int = DEFAULT_MAX_ROWS) -> Va
     except OptimizeError as e:
         return ValidationResult.reject("unknown_column", f"Unknown column or reference: {e}")
 
-    # 6. Enforce the row limit: add one if absent, cap one that is too large.
+    # 6. Joins between key columns must follow a declared join path (catches ORDERS joined
+    #    straight to NATION on O_CUSTKEY = N_NATIONKEY, which runs but gives wrong numbers).
+    bad = _undeclared_key_join(check, catalog)
+    if bad:
+        declared = "; ".join(f"{a[0]}.{a[1]} = {b[0]}.{b[1]}" for a, b in catalog.joins)
+        return ValidationResult.reject(
+            "undeclared_join",
+            f"{bad} joins two unrelated keys. Join tables only through these declared joins, "
+            f"adding the tables in between: {declared}",
+        )
+
+    # 7. Enforce the row limit: add one if absent, cap one that is too large.
     limit_node = tree.args.get("limit")
     limit_added = False
     if limit_node is None:

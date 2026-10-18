@@ -84,6 +84,7 @@ class Pipeline:
             tables=dataset.catalog(),
             database=dataset.snowflake.database,
             schema=dataset.snowflake.schema_,
+            joins=dataset.join_pairs(),
         )
         self._latest_date: str | None = None
 

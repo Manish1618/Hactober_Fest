@@ -15,4 +15,6 @@ def tpch():
 
 @pytest.fixture(scope="session")
 def catalog(tpch):
-    return Catalog(tpch.catalog(), tpch.snowflake.database, tpch.snowflake.schema_)
+    return Catalog(
+        tpch.catalog(), tpch.snowflake.database, tpch.snowflake.schema_, joins=tpch.join_pairs()
+    )

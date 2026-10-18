@@ -8,7 +8,7 @@ from typing import Any
 
 from datamind.config.models import DatasetConfig
 
-UNDERSTAND = "understand_v1"
+UNDERSTAND = "understand_v2"
 DRAFT_SQL = "draft_sql_v2"
 ANSWER = "answer_v1"
 
@@ -31,7 +31,7 @@ def _fill(template: str, trusted: dict[str, str], untrusted: dict[str, str]) -> 
     return _PLACEHOLDER.sub(lambda m: values.get(m.group(1), m.group(0)), template)
 
 
-def describe_schema(cfg: DatasetConfig) -> str:
+def describe_schema(cfg: DatasetConfig, with_joins: bool = True) -> str:
     lines: list[str] = []
     for name, table in cfg.tables.items():
         lines.append(f"TABLE {name}: {table.description}")
@@ -39,7 +39,7 @@ def describe_schema(cfg: DatasetConfig) -> str:
             extra = f" [{c.type}]" if c.type else ""
             syn = f" (also called: {', '.join(c.synonyms)})" if c.synonyms else ""
             lines.append(f"  - {col}{extra}: {c.description}{syn}")
-    if cfg.joins:
+    if cfg.joins and with_joins:
         lines.append("JOINS:")
         lines.extend(f"  - {j}" for j in cfg.joins)
     return "\n".join(lines)
@@ -54,12 +54,11 @@ def _time_note(cfg: DatasetConfig) -> str:
 
 
 def render_understand(cfg: DatasetConfig, question: str, history: str) -> str:
-    tables = "; ".join(f"{n} ({t.description})" for n, t in cfg.tables.items())
     return _fill(
         load_template(UNDERSTAND),
         trusted={
             "dataset": f"{cfg.display_name}. {cfg.description}".strip(),
-            "tables": tables,
+            "schema": describe_schema(cfg, with_joins=False),
             "defaults": _defaults(cfg),
             "time_note": _time_note(cfg),
         },

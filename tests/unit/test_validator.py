@@ -96,3 +96,37 @@ def test_reports_tables_used(catalog):
 def test_cte_cannot_shadow_into_unknown_schema(catalog):
     r = validate("WITH ORDERS AS (SELECT 1 x) SELECT * FROM OTHER.ORDERS", catalog)
     assert not r.ok
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # Live phase 1 failures (T2-02, T2-05): ORDERS joined straight to NATION.
+        "SELECT r_name, SUM(l_extendedprice) FROM lineitem JOIN orders ON l_orderkey = o_orderkey "
+        "JOIN nation ON o_custkey = n_nationkey JOIN region ON n_regionkey = r_regionkey "
+        "GROUP BY r_name",
+        "SELECT N_NAME FROM ORDERS o JOIN NATION n ON o.O_CUSTKEY = n.N_NATIONKEY",
+        "SELECT C_NAME FROM CUSTOMER, SUPPLIER WHERE C_CUSTKEY = S_SUPPKEY",
+    ],
+)
+def test_join_on_unrelated_keys_is_rejected(sql, catalog):
+    r = validate(sql, catalog)
+    assert r.code == "undeclared_join", r.reason
+    assert "CUSTOMER.C_NATIONKEY = NATION.N_NATIONKEY" in r.reason
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # Customers and suppliers in the same nation (TPC-H Q5 style) share the nation key.
+        "SELECT COUNT(*) FROM CUSTOMER JOIN SUPPLIER ON C_NATIONKEY = S_NATIONKEY",
+        "SELECT N_NAME FROM ORDERS JOIN CUSTOMER ON O_CUSTKEY = C_CUSTKEY "
+        "JOIN NATION ON C_NATIONKEY = N_NATIONKEY",
+        # Non-key comparisons are not join paths.
+        "SELECT COUNT(*) FROM LINEITEM JOIN ORDERS ON L_ORDERKEY = O_ORDERKEY "
+        "WHERE L_SHIPDATE = O_ORDERDATE",
+    ],
+)
+def test_declared_and_equivalent_joins_pass(sql, catalog):
+    r = validate(sql, catalog)
+    assert r.ok, r.reason

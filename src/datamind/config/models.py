@@ -134,3 +134,9 @@ class DatasetConfig(_Strict):
     def catalog(self) -> dict[str, set[str]]:
         """Tables and columns described by this configuration, upper-cased."""
         return {t: set(tbl.columns) for t, tbl in self.tables.items()}
+
+    def join_pairs(self) -> list[tuple[tuple[str, str], tuple[str, str]]]:
+        """Declared joins as ((table, column), (table, column)) pairs."""
+        return [
+            ((j.left_table, j.left_column), (j.right_table, j.right_column)) for j in self.joins
+        ]

@@ -46,7 +46,9 @@ def example_responder(cfg: DatasetConfig, extra: dict[str, str] | None = None):
 
 
 def _catalog(cfg: DatasetConfig) -> Catalog:
-    return Catalog(cfg.catalog(), cfg.snowflake.database, cfg.snowflake.schema_)
+    return Catalog(
+        cfg.catalog(), cfg.snowflake.database, cfg.snowflake.schema_, joins=cfg.join_pairs()
+    )
 
 
 def cmd_check(args) -> int:
