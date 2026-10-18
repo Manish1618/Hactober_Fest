@@ -1,0 +1,157 @@
+# Wholesale orders: the TPC-H sample shared into every Snowflake account.
+# Referenced in place (SNOWFLAKE_SAMPLE_DATA.TPCH_SF1); nothing is copied into this repository.
+dataset: tpch_sf1
+display_name: Wholesale orders (TPC-H sample)
+description: >
+  Fictional wholesale distributor: customers place orders, each order has line items for parts
+  bought from suppliers. Customers and suppliers belong to nations, nations to world regions.
+licence_note: TPC-H sample data provided by Snowflake (SNOWFLAKE_SAMPLE_DATA). Synthetic data.
+
+snowflake:
+  database: SNOWFLAKE_SAMPLE_DATA
+  schema: TPCH_SF1
+  role: DATAMIND_READER
+
+time:
+  anchor_table: ORDERS
+  anchor_column: O_ORDERDATE
+  note: Orders run from 1992 to 1998. Relative dates resolve against the latest order date.
+
+# Vague terms with an agreed meaning. The system answers with this meaning and shows it as an
+# assumption chip instead of asking (PRD 8.3).
+defaults:
+  - term: best customer
+    assumption: Best customers means highest total revenue (price after discount).
+    metric: revenue
+  - term: top supplier
+    assumption: Top suppliers means highest revenue from their line items.
+    metric: revenue
+  - term: sales
+    assumption: Sales means revenue (price after discount), not order count.
+    metric: revenue
+
+metrics:
+  revenue:
+    description: Money earned from line items after discount.
+    sql: SUM(L_EXTENDEDPRICE * (1 - L_DISCOUNT))
+    unit: currency
+    synonyms: [revenue, sales, income, turnover, spend, spent]
+  order_count:
+    description: Number of distinct orders.
+    sql: COUNT(DISTINCT O_ORDERKEY)
+    unit: count
+    synonyms: [order count, number of orders, orders]
+  late_shipments:
+    description: Line items received after the committed date.
+    sql: COUNT_IF(L_RECEIPTDATE > L_COMMITDATE)
+    unit: count
+    synonyms: [late, late deliveries, delayed]
+
+tables:
+  REGION:
+    description: World region lookup (5 rows).
+    columns:
+      R_REGIONKEY: {type: NUMBER, description: Region identifier}
+      R_NAME: {type: VARCHAR, description: Region name such as EUROPE or ASIA, synonyms: [region, continent]}
+      R_COMMENT: {type: VARCHAR, description: Free-text comment}
+  NATION:
+    description: Country lookup (25 rows).
+    columns:
+      N_NATIONKEY: {type: NUMBER, description: Nation identifier}
+      N_NAME: {type: VARCHAR, description: Country name in capitals such as GERMANY, synonyms: [country, nation]}
+      N_REGIONKEY: {type: NUMBER, description: Region the nation belongs to}
+      N_COMMENT: {type: VARCHAR, description: Free-text comment}
+  CUSTOMER:
+    description: One row per customer.
+    columns:
+      C_CUSTKEY: {type: NUMBER, description: Customer identifier}
+      C_NAME: {type: VARCHAR, description: Customer name such as Customer#000000001, synonyms: [customer, client]}
+      C_ADDRESS: {type: VARCHAR, description: Street address}
+      C_NATIONKEY: {type: NUMBER, description: Nation the customer is in}
+      C_PHONE: {type: VARCHAR, description: Phone number}
+      C_ACCTBAL: {type: NUMBER, description: Account balance, unit: currency, synonyms: [balance]}
+      C_MKTSEGMENT: {type: VARCHAR, description: "Market segment: AUTOMOBILE, BUILDING, FURNITURE, HOUSEHOLD or MACHINERY", synonyms: [segment]}
+      C_COMMENT: {type: VARCHAR, description: Free-text comment}
+  ORDERS:
+    description: One row per customer order.
+    columns:
+      O_ORDERKEY: {type: NUMBER, description: Order identifier}
+      O_CUSTKEY: {type: NUMBER, description: Customer who placed the order}
+      O_ORDERSTATUS: {type: VARCHAR, description: "Status: F fulfilled, O open, P partial", synonyms: [status]}
+      O_TOTALPRICE: {type: NUMBER, description: Total price of the order including tax, unit: currency}
+      O_ORDERDATE: {type: DATE, description: Date the order was placed, synonyms: [order date, date]}
+      O_ORDERPRIORITY: {type: VARCHAR, description: "Priority such as 1-URGENT or 5-LOW", synonyms: [priority]}
+      O_CLERK: {type: VARCHAR, description: Clerk who handled the order}
+      O_SHIPPRIORITY: {type: NUMBER, description: Shipping priority}
+      O_COMMENT: {type: VARCHAR, description: Free-text comment}
+  LINEITEM:
+    description: One row per item on an order.
+    columns:
+      L_ORDERKEY: {type: NUMBER, description: Order the item belongs to}
+      L_PARTKEY: {type: NUMBER, description: Part sold}
+      L_SUPPKEY: {type: NUMBER, description: Supplier of the part}
+      L_LINENUMBER: {type: NUMBER, description: Line number within the order}
+      L_QUANTITY: {type: NUMBER, description: Quantity ordered, unit: count, synonyms: [quantity, units]}
+      L_EXTENDEDPRICE: {type: NUMBER, description: Quantity times part price before discount, unit: currency}
+      L_DISCOUNT: {type: NUMBER, description: Discount as a fraction between 0 and 0.10, unit: fraction}
+      L_TAX: {type: NUMBER, description: Tax as a fraction, unit: fraction}
+      L_RETURNFLAG: {type: VARCHAR, description: "Return flag: R returned, A accepted, N none"}
+      L_LINESTATUS: {type: VARCHAR, description: "Line status: O open, F fulfilled"}
+      L_SHIPDATE: {type: DATE, description: Date shipped, synonyms: [ship date]}
+      L_COMMITDATE: {type: DATE, description: Date the supplier committed to deliver}
+      L_RECEIPTDATE: {type: DATE, description: Date the customer received the item}
+      L_SHIPINSTRUCT: {type: VARCHAR, description: Shipping instruction}
+      L_SHIPMODE: {type: VARCHAR, description: "Ship mode such as AIR, MAIL, SHIP, TRUCK", synonyms: [shipping method]}
+      L_COMMENT: {type: VARCHAR, description: Free-text comment}
+  PART:
+    description: One row per product.
+    columns:
+      P_PARTKEY: {type: NUMBER, description: Part identifier}
+      P_NAME: {type: VARCHAR, description: Part name, synonyms: [product, part]}
+      P_MFGR: {type: VARCHAR, description: Manufacturer, synonyms: [manufacturer]}
+      P_BRAND: {type: VARCHAR, description: Brand, synonyms: [brand]}
+      P_TYPE: {type: VARCHAR, description: Part type such as ECONOMY ANODIZED STEEL, synonyms: [type]}
+      P_SIZE: {type: NUMBER, description: Size}
+      P_CONTAINER: {type: VARCHAR, description: Container type}
+      P_RETAILPRICE: {type: NUMBER, description: List price, unit: currency}
+      P_COMMENT: {type: VARCHAR, description: Free-text comment}
+  SUPPLIER:
+    description: One row per supplier.
+    columns:
+      S_SUPPKEY: {type: NUMBER, description: Supplier identifier}
+      S_NAME: {type: VARCHAR, description: Supplier name, synonyms: [supplier, vendor]}
+      S_ADDRESS: {type: VARCHAR, description: Street address}
+      S_NATIONKEY: {type: NUMBER, description: Nation the supplier is in}
+      S_PHONE: {type: VARCHAR, description: Phone number}
+      S_ACCTBAL: {type: NUMBER, description: Account balance, unit: currency}
+      S_COMMENT: {type: VARCHAR, description: Free-text comment}
+  PARTSUPP:
+    description: Which suppliers offer which parts, with cost and stock.
+    columns:
+      PS_PARTKEY: {type: NUMBER, description: Part offered}
+      PS_SUPPKEY: {type: NUMBER, description: Supplier offering it}
+      PS_AVAILQTY: {type: NUMBER, description: Quantity available, unit: count, synonyms: [stock, availability]}
+      PS_SUPPLYCOST: {type: NUMBER, description: Supplier cost per unit, unit: currency}
+      PS_COMMENT: {type: VARCHAR, description: Free-text comment}
+
+joins:
+  - NATION.N_REGIONKEY = REGION.R_REGIONKEY
+  - CUSTOMER.C_NATIONKEY = NATION.N_NATIONKEY
+  - SUPPLIER.S_NATIONKEY = NATION.N_NATIONKEY
+  - ORDERS.O_CUSTKEY = CUSTOMER.C_CUSTKEY
+  - LINEITEM.L_ORDERKEY = ORDERS.O_ORDERKEY
+  - LINEITEM.L_PARTKEY = PART.P_PARTKEY
+  - LINEITEM.L_SUPPKEY = SUPPLIER.S_SUPPKEY
+  - PARTSUPP.PS_PARTKEY = PART.P_PARTKEY
+  - PARTSUPP.PS_SUPPKEY = SUPPLIER.S_SUPPKEY
+
+formats:
+  currency: {prefix: "$", decimals: 2}
+  count: {decimals: 0}
+  fraction: {decimals: 2}
+
+starter_questions:
+  - What was total revenue in 1995?
+  - Which five customers spent the most, and which country are they in?
+  - How did order counts change month by month in 1996?
+  - Which European suppliers supply the most parts?

@@ -1,0 +1,21 @@
+# Held-out split (FR-K2). Never used in prompts, examples or tuning. Run only to report accuracy.
+dataset: tpch_sf1
+split: heldout
+questions:
+  - id: H1-01
+    group: T1
+    question: What is the average discount given on line items?
+    expected_status: ANSWERED
+    ground_truth_sql: SELECT AVG(L_DISCOUNT) FROM LINEITEM
+  - id: H2-01
+    group: T2
+    question: How many orders of each priority were placed in 1995?
+    expected_status: ANSWERED
+    ground_truth_sql: |
+      SELECT O_ORDERPRIORITY, COUNT(*) FROM ORDERS
+      WHERE O_ORDERDATE >= '1995-01-01' AND O_ORDERDATE < '1996-01-01'
+      GROUP BY O_ORDERPRIORITY
+  - id: H6-01
+    group: T6
+    question: Show revenue for customers in Narnia.
+    expected_status: NO_DATA

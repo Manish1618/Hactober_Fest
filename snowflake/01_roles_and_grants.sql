@@ -1,0 +1,52 @@
+-- DataMind: roles, grants and the application user.
+-- Run as ACCOUNTADMIN after 00_account_setup.sql. Safe to run more than once.
+
+USE ROLE ACCOUNTADMIN;
+
+-- Roles (least privilege, NFR-03)
+CREATE ROLE IF NOT EXISTS DATAMIND_LOADER     COMMENT = 'Loads OWID tables. Used only by the load script.';
+CREATE ROLE IF NOT EXISTS DATAMIND_READER     COMMENT = 'Read-only. The application always runs as this role.';
+CREATE ROLE IF NOT EXISTS DATAMIND_RESTRICTED COMMENT = 'Read-only subset for the access-control demo.';
+
+GRANT ROLE DATAMIND_LOADER     TO ROLE SYSADMIN;
+GRANT ROLE DATAMIND_READER     TO ROLE SYSADMIN;
+GRANT ROLE DATAMIND_RESTRICTED TO ROLE SYSADMIN;
+
+-- Warehouse usage
+GRANT USAGE ON WAREHOUSE DATAMIND_WH TO ROLE DATAMIND_LOADER;
+GRANT USAGE ON WAREHOUSE DATAMIND_WH TO ROLE DATAMIND_READER;
+GRANT USAGE ON WAREHOUSE DATAMIND_WH TO ROLE DATAMIND_RESTRICTED;
+
+-- TPC-H sample data: read access for the reader role.
+GRANT IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE_SAMPLE_DATA TO ROLE DATAMIND_READER;
+
+-- Loader: owns the OWID schema contents.
+GRANT USAGE ON DATABASE DATAMIND_DB TO ROLE DATAMIND_LOADER;
+GRANT ALL ON SCHEMA DATAMIND_DB.OWID TO ROLE DATAMIND_LOADER;
+
+-- Reader: SELECT only on OWID.
+GRANT USAGE ON DATABASE DATAMIND_DB TO ROLE DATAMIND_READER;
+GRANT USAGE ON SCHEMA DATAMIND_DB.OWID TO ROLE DATAMIND_READER;
+GRANT SELECT ON ALL TABLES IN SCHEMA DATAMIND_DB.OWID TO ROLE DATAMIND_READER;
+GRANT SELECT ON FUTURE TABLES IN SCHEMA DATAMIND_DB.OWID TO ROLE DATAMIND_READER;
+
+-- Restricted: OWID only, and only the tables granted in 02_owid_schema.sql (FR-G4).
+GRANT USAGE ON DATABASE DATAMIND_DB TO ROLE DATAMIND_RESTRICTED;
+GRANT USAGE ON SCHEMA DATAMIND_DB.OWID TO ROLE DATAMIND_RESTRICTED;
+
+-- Application user with key-pair authentication (NFR-04).
+-- Replace the RSA_PUBLIC_KEY value with the body of your public key (no header/footer lines).
+-- Generate a key pair with:
+--   openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -out datamind_app_rsa_key.p8 -nocrypt
+--   openssl rsa -in datamind_app_rsa_key.p8 -pubout -out datamind_app_rsa_key.pub
+CREATE USER IF NOT EXISTS DATAMIND_APP
+  TYPE = SERVICE
+  DEFAULT_ROLE = DATAMIND_READER
+  DEFAULT_WAREHOUSE = DATAMIND_WH
+  COMMENT = 'DataMind application user (read-only)';
+-- ALTER USER DATAMIND_APP SET RSA_PUBLIC_KEY = 'MIIBIjANBgkqh...';
+
+GRANT ROLE DATAMIND_READER     TO USER DATAMIND_APP;
+GRANT ROLE DATAMIND_RESTRICTED TO USER DATAMIND_APP;
+
+-- Loader user is optional; a person with DATAMIND_LOADER can run the load script instead.

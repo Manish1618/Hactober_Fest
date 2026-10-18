@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "datamind"
+version = "0.1.0"
+description = "Ask questions of your Snowflake data in everyday language and get answers that show their work."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+dependencies = [
+    "sqlglot==30.23.0",
+    "pydantic==2.14.1",
+    "pyyaml==6.0.3",
+    "httpx==0.28.1",
+    "snowflake-connector-python[pandas]==5.0.0",
+    "cryptography==50.0.2",
+    "pandas==2.3.3",
+]
+
+[project.optional-dependencies]
+ui = ["streamlit==1.66.0"]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.17.1",
+    # Local stand-in database for offline tests only. Real answers always come from Snowflake.
+    "duckdb==1.5.6",
+]
+
+[project.scripts]
+datamind = "datamind.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+datamind = ["prompts/*.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: needs a live Snowflake account and model endpoint"]
+addopts = "-m 'not integration'"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
