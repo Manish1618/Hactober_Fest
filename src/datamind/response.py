@@ -39,8 +39,11 @@ class Evidence(BaseModel):
     dataset: str = ""
     licence_note: str = ""
     executed_at: str = ""
+    data_latest_date: str = ""
+    context_used: str = ""
+    repair_attempts: int = 0
     model: str = ""
-    prompt_version: str = ""
+    prompt_versions: list[str] = Field(default_factory=list)
     limits: list[str] = Field(default_factory=list)
 
 

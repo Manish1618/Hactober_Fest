@@ -63,5 +63,5 @@ def test_unreachable_endpoint_raises_model_error():
 
 
 def test_scripted_adapter():
-    a = ScriptedAdapter(lambda p: {"sql": "SELECT 2"})
+    a = ScriptedAdapter(lambda p, v: {"sql": "SELECT 2"})
     assert a.generate("p", SqlDraft, prompt_version="v1").sql == "SELECT 2"

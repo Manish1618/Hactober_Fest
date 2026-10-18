@@ -101,23 +101,24 @@ class OllamaAdapter:
 class ScriptedAdapter:
     """Offline stand-in for Gemma: returns canned replies. For tests and the phase 0 demo only.
 
-    `responder` receives the rendered prompt and returns the reply as a dict.
+    `responder` receives the rendered prompt and the prompt version, and returns the reply as a
+    dict. The version tells it which task is being asked (understand, draft SQL, answer).
     """
 
-    def __init__(self, responder: Callable[[str], dict], name: str = "scripted-stub"):
+    def __init__(self, responder: Callable[[str, str], dict], name: str = "scripted-stub"):
         self.name = name
         self._responder = responder
 
     def generate(self, prompt: str, schema: type[T], *, prompt_version: str) -> T:
         try:
-            return schema.model_validate(self._responder(prompt))
+            return schema.model_validate(self._responder(prompt, prompt_version))
         except KeyError as e:
             raise ModelError(f"No scripted reply: {e.args[0] if e.args else ''}") from e
         except ValidationError as e:
             raise ModelError(f"Scripted reply has the wrong shape: {e}") from e
 
 
-def build_adapter(settings: ModelSettings, scripted: Callable[[str], dict] | None = None):
+def build_adapter(settings: ModelSettings, scripted: Callable[[str, str], dict] | None = None):
     if settings.provider == "ollama":
         return OllamaAdapter(settings)
     if settings.provider == "scripted":

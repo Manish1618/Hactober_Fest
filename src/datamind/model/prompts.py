@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import re
 from importlib import resources
+from typing import Any
 
 from datamind.config.models import DatasetConfig
 
-DRAFT_SQL = "draft_sql_v1"
+UNDERSTAND = "understand_v1"
+DRAFT_SQL = "draft_sql_v2"
+ANSWER = "answer_v1"
 
 
 def load_template(name: str) -> str:
@@ -14,8 +18,17 @@ def load_template(name: str) -> str:
 
 
 def _neutralise(text: str) -> str:
-    """Stop user text from closing or opening a data block."""
+    """Stop user or data text from closing or opening a data block."""
     return text.replace("<", "&lt;").replace(">", "&gt;")
+
+
+_PLACEHOLDER = re.compile(r"\{(\w+)\}")
+
+
+def _fill(template: str, trusted: dict[str, str], untrusted: dict[str, str]) -> str:
+    # One pass over the template only, so inserted text is never scanned for placeholders.
+    values = {**trusted, **{k: _neutralise(v) for k, v in untrusted.items()}}
+    return _PLACEHOLDER.sub(lambda m: values.get(m.group(1), m.group(0)), template)
 
 
 def describe_schema(cfg: DatasetConfig) -> str:
@@ -32,7 +45,34 @@ def describe_schema(cfg: DatasetConfig) -> str:
     return "\n".join(lines)
 
 
-def render_draft_sql(cfg: DatasetConfig, question: str) -> str:
+def _defaults(cfg: DatasetConfig) -> str:
+    return "\n".join(f"- {d.term}: {d.assumption}" for d in cfg.defaults) or "- none"
+
+
+def _time_note(cfg: DatasetConfig) -> str:
+    return cfg.time.note if cfg.time and cfg.time.note else "No time column configured."
+
+
+def render_understand(cfg: DatasetConfig, question: str, history: str) -> str:
+    tables = "; ".join(f"{n} ({t.description})" for n, t in cfg.tables.items())
+    return _fill(
+        load_template(UNDERSTAND),
+        trusted={
+            "dataset": f"{cfg.display_name}. {cfg.description}".strip(),
+            "tables": tables,
+            "defaults": _defaults(cfg),
+            "time_note": _time_note(cfg),
+        },
+        untrusted={"history": history or "(no earlier turns)", "question": question},
+    )
+
+
+def render_draft_sql(
+    cfg: DatasetConfig,
+    question: str,
+    latest_date: str = "unknown",
+    failed_attempts: list[tuple[str, str]] | None = None,
+) -> str:
     metrics = (
         "\n".join(
             f"- {name} = {m.sql} ({m.description}; synonyms: {', '.join(m.synonyms)})"
@@ -40,15 +80,44 @@ def render_draft_sql(cfg: DatasetConfig, question: str) -> str:
         )
         or "- none"
     )
-    defaults = "\n".join(f"- {d.term}: {d.assumption}" for d in cfg.defaults) or "- none"
     examples = "\n\n".join(f"Q: {e.question}\nSQL: {e.sql.strip()}" for e in cfg.examples) or "none"
-    time_note = cfg.time.note if cfg.time and cfg.time.note else "No time column configured."
-    return (
-        load_template(DRAFT_SQL)
-        .replace("{schema}", describe_schema(cfg))
-        .replace("{metrics}", metrics)
-        .replace("{defaults}", defaults)
-        .replace("{time_note}", time_note)
-        .replace("{examples}", examples)
-        .replace("{question}", _neutralise(question))
+    repair = ""
+    if failed_attempts:
+        parts = [
+            f"Attempt {i}:\n{sql.strip()}\nError: {err}"
+            for i, (sql, err) in enumerate(failed_attempts, 1)
+        ]
+        repair = (
+            "\nEarlier attempts failed. Write a corrected query that avoids these errors:\n"
+            + "\n\n".join(parts)
+            + "\n"
+        )
+    return _fill(
+        load_template(DRAFT_SQL),
+        trusted={
+            "schema": describe_schema(cfg),
+            "metrics": metrics,
+            "defaults": _defaults(cfg),
+            "time_note": _time_note(cfg),
+            "latest_date": latest_date,
+            "examples": examples,
+            "repair": repair,
+        },
+        untrusted={"question": question},
+    )
+
+
+def format_rows(columns: list[str], rows: list[list[Any]]) -> str:
+    """Rows numbered from 1, one per line, as column=value pairs."""
+    return "\n".join(
+        f"r{i}: " + ", ".join(f"{c}={v}" for c, v in zip(columns, row, strict=True))
+        for i, row in enumerate(rows, 1)
+    )
+
+
+def render_answer(question: str, columns: list[str], rows: list[list[Any]], row_count: int) -> str:
+    return _fill(
+        load_template(ANSWER),
+        trusted={"row_count": str(row_count)},
+        untrusted={"question": question, "rows": format_rows(columns, rows)},
     )

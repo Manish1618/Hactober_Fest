@@ -7,6 +7,23 @@ questions:
     question: What is the average discount given on line items?
     expected_status: ANSWERED
     ground_truth_sql: SELECT AVG(L_DISCOUNT) FROM LINEITEM
+  - id: H1-02
+    group: T1
+    question: How many parts are made by Brand#23?
+    expected_status: ANSWERED
+    ground_truth_sql: SELECT COUNT(*) FROM PART WHERE P_BRAND = 'Brand#23'
+  - id: H1-03
+    group: T1
+    question: How many orders are still open?
+    expected_status: ANSWERED
+    ground_truth_sql: SELECT COUNT(*) FROM ORDERS WHERE O_ORDERSTATUS = 'O'
+  - id: H1-04
+    group: T1
+    question: What was the average order total price in 1993?
+    expected_status: ANSWERED
+    ground_truth_sql: |
+      SELECT AVG(O_TOTALPRICE) FROM ORDERS
+      WHERE O_ORDERDATE >= '1993-01-01' AND O_ORDERDATE < '1994-01-01'
   - id: H2-01
     group: T2
     question: How many orders of each priority were placed in 1995?
@@ -15,6 +32,42 @@ questions:
       SELECT O_ORDERPRIORITY, COUNT(*) FROM ORDERS
       WHERE O_ORDERDATE >= '1995-01-01' AND O_ORDERDATE < '1996-01-01'
       GROUP BY O_ORDERPRIORITY
+  - id: H2-02
+    group: T2
+    question: Which nation in EUROPE has the highest total customer account balance?
+    expected_status: ANSWERED
+    ground_truth_sql: |
+      SELECT N_NAME, SUM(C_ACCTBAL) AS balance
+      FROM CUSTOMER
+      JOIN NATION ON C_NATIONKEY = N_NATIONKEY
+      JOIN REGION ON N_REGIONKEY = R_REGIONKEY
+      WHERE R_NAME = 'EUROPE'
+      GROUP BY N_NAME
+      ORDER BY balance DESC
+      LIMIT 1
+  - id: H2-03
+    group: T2
+    question: How much revenue came from customers in the BUILDING segment in 1994?
+    expected_status: ANSWERED
+    ground_truth_sql: |
+      SELECT SUM(L_EXTENDEDPRICE * (1 - L_DISCOUNT))
+      FROM LINEITEM
+      JOIN ORDERS ON L_ORDERKEY = O_ORDERKEY
+      JOIN CUSTOMER ON O_CUSTKEY = C_CUSTKEY
+      WHERE C_MKTSEGMENT = 'BUILDING'
+        AND O_ORDERDATE >= '1994-01-01' AND O_ORDERDATE < '1995-01-01'
+  - id: H2-04
+    group: T2
+    question: How many part offers come from suppliers in each nation of AFRICA?
+    expected_status: ANSWERED
+    ground_truth_sql: |
+      SELECT N_NAME, COUNT(*)
+      FROM PARTSUPP
+      JOIN SUPPLIER ON PS_SUPPKEY = S_SUPPKEY
+      JOIN NATION ON S_NATIONKEY = N_NATIONKEY
+      JOIN REGION ON N_REGIONKEY = R_REGIONKEY
+      WHERE R_NAME = 'AFRICA'
+      GROUP BY N_NAME
   - id: H6-01
     group: T6
     question: Show revenue for customers in Narnia.

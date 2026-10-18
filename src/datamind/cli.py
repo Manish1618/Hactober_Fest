@@ -1,8 +1,9 @@
-"""Command line: datamind check | smoke | ask."""
+"""Command line: datamind check | smoke | ask | eval."""
 
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import sys
 
@@ -18,16 +19,28 @@ from datamind.settings import get_settings
 from datamind.snowflake_io.executor import ExecutionError, LocalExecutor, SnowflakeExecutor
 
 
-def example_responder(cfg: DatasetConfig):
-    """Scripted stand-in for Gemma: answers only questions that appear in examples.yaml."""
-    known = {e.question.strip().lower(): e.sql for e in cfg.examples}
+def prompt_question(prompt: str) -> str:
+    """The question block is the last one in every prompt; earlier mentions are in the rules."""
+    return prompt.rpartition("<question>")[2].partition("</question>")[0].strip()
 
-    def respond(prompt: str) -> dict:
-        # The question block is the last one in the prompt; earlier mentions are in the rules.
-        q = prompt.rpartition("<question>")[2].partition("</question>")[0].strip().lower()
-        if q not in known:
+
+def example_responder(cfg: DatasetConfig, extra: dict[str, str] | None = None):
+    """Scripted stand-in for Gemma: answers only questions that appear in examples.yaml.
+
+    `extra` maps more questions to SQL (the evaluation tests use it with the golden SQL).
+    """
+    known = {e.question.strip().lower(): e.sql for e in cfg.examples}
+    known.update({k.strip().lower(): v for k, v in (extra or {}).items()})
+
+    def respond(prompt: str, prompt_version: str) -> dict:
+        q = html.unescape(prompt_question(prompt))
+        if prompt_version.startswith("understand"):
+            return {"standalone_question": q, "category": "answerable"}
+        if prompt_version.startswith("answer"):
+            return {"answer": ""}  # empty answer: the pipeline uses its code-only answer
+        if q.lower() not in known:
             raise KeyError("the offline stub only knows the questions in examples.yaml")
-        return {"sql": known[q], "assumptions": [], "confidence": 1.0}
+        return {"sql": known[q.lower()], "assumptions": [], "confidence": 1.0}
 
     return respond
 
@@ -97,14 +110,24 @@ def _print_response(resp: Response) -> None:
         print(f"Answer:   {resp.answer}")
     if resp.reason:
         print(f"Reason:   {resp.reason}")
+    if resp.clarification:
+        print(f"Asks:     {resp.clarification.question}")
+        for o in resp.clarification.options:
+            print(f"          - {o}")
+    for s in resp.suggestions:
+        print(f"Try:      {s}")
     for a in resp.assumptions:
         print(f"Assumes:  {a}")
     if resp.explanation:
         print(f"How:      {resp.explanation}")
     print("--- evidence ---")
     print(f"Question: {ev.question_as_understood}")
-    print(f"Dataset:  {ev.dataset}  (backend: {ev.backend})")
-    print(f"Model:    {ev.model}  prompt {ev.prompt_version}")
+    if ev.context_used:
+        print(f"Context:  {ev.context_used}")
+    print(f"Dataset:  {ev.dataset}  (backend: {ev.backend}, data up to {ev.data_latest_date})")
+    print(f"Model:    {ev.model}  prompts {', '.join(ev.prompt_versions) or 'none'}")
+    if ev.repair_attempts:
+        print(f"Repairs:  {ev.repair_attempts}")
     if ev.sql:
         print("SQL:\n" + "\n".join("  " + line for line in ev.sql.splitlines()))
     if ev.query_id:
@@ -119,17 +142,13 @@ def _print_response(resp: Response) -> None:
         print(f"Limit:    {limit}")
 
 
-def cmd_ask(args) -> int:
-    settings = get_settings()
-    cfg = load_dataset(args.dataset or settings.dataset)
+def _build(args, settings, cfg, phrase_answers: bool = True) -> Pipeline:
     backend = args.backend or settings.backend
     provider = args.model or settings.model.provider
-
     if provider == "scripted":
         model = ScriptedAdapter(example_responder(cfg))
     else:
         model = OllamaAdapter(settings.model)
-
     if backend == "local":
         from datamind.snowflake_io.fixture import build_fixture
 
@@ -137,13 +156,46 @@ def cmd_ask(args) -> int:
         print("NOTE: local fixture backend. Numbers are synthetic, not from Snowflake.\n")
     else:
         executor = SnowflakeExecutor(settings.snowflake, cfg)
+    return Pipeline(cfg, model, executor, max_rows=settings.max_rows, phrase_answers=phrase_answers)
 
-    resp = Pipeline(cfg, model, executor, max_rows=settings.max_rows).ask(args.question)
+
+def cmd_ask(args) -> int:
+    settings = get_settings()
+    cfg = load_dataset(args.dataset or settings.dataset)
+    resp = _build(args, settings, cfg).ask(args.question)
     if args.json:
         print(json.dumps(resp.model_dump(mode="json"), indent=2))
     else:
         _print_response(resp)
     return 0 if resp.status.value in ("ANSWERED", "NO_DATA") else 2
+
+
+def cmd_eval(args) -> int:
+    """Run the golden set through the pipeline and report accuracy per group."""
+    from datamind.evaluation import load_set, run_eval
+    from datamind.evaluation.golden import evaluation_dir
+
+    settings = get_settings()
+    cfg = load_dataset(args.dataset or settings.dataset)
+    pipeline = _build(args, settings, cfg, phrase_answers=args.phrase)
+    groups = set(args.groups.split(",")) if args.groups else None
+    status = 0
+    for split in ("golden", "heldout") if args.split == "all" else (args.split,):
+        golden = load_set(cfg.dataset, split)
+        print(f"== {split} ({cfg.dataset}, model {pipeline.model.name}) ==")
+
+        def show(r):
+            mark = "PASS" if r.passed else "FAIL"
+            print(f"{mark} {r.id:6} {r.status:11} {r.seconds:6.1f}s  {r.detail}", flush=True)
+
+        report = run_eval(pipeline, golden, groups, progress=show)
+        for g, (p, n) in report.by_group().items():
+            print(f"     {g}: {p}/{n} ({p / n:.0%})")
+        ok, summary = report.gate()
+        print(f"Gate {'PASSED' if ok else 'FAILED'}: {summary}")
+        print(f"Report: {report.save(evaluation_dir() / 'reports')}")
+        status |= 0 if ok else 1
+    return status
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -165,6 +217,17 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--model", choices=["ollama", "scripted"])
     a.add_argument("--json", action="store_true")
     a.set_defaults(func=cmd_ask)
+
+    e = sub.add_parser("eval", help="run the golden set and report accuracy")
+    e.add_argument("--dataset")
+    e.add_argument("--split", choices=["golden", "heldout", "all"], default="golden")
+    e.add_argument("--groups", help="comma-separated groups, for example T1,T2,T7")
+    e.add_argument("--backend", choices=["snowflake", "local"])
+    e.add_argument("--model", choices=["ollama", "scripted"])
+    e.add_argument(
+        "--phrase", action="store_true", help="also phrase answers with the model (slower)"
+    )
+    e.set_defaults(func=cmd_eval)
 
     args = p.parse_args(argv)
     return args.func(args)

@@ -43,6 +43,25 @@ questions:
     notes: TPC-H has both AIR and REG AIR; the plain reading is AIR only. Revisit in phase 1.
     ground_truth_sql: SELECT COUNT(*) FROM LINEITEM WHERE L_SHIPMODE = 'AIR'
 
+  - id: T1-06
+    group: T1
+    question: What was the total quantity of items shipped in 1998?
+    expected_status: ANSWERED
+    notes: Shipped means the ship date, not the order date.
+    ground_truth_sql: |
+      SELECT SUM(L_QUANTITY) FROM LINEITEM
+      WHERE L_SHIPDATE >= '1998-01-01' AND L_SHIPDATE < '1999-01-01'
+  - id: T1-07
+    group: T1
+    question: How many suppliers are there?
+    expected_status: ANSWERED
+    ground_truth_sql: SELECT COUNT(*) FROM SUPPLIER
+  - id: T1-08
+    group: T1
+    question: What is the largest total price of a single order?
+    expected_status: ANSWERED
+    ground_truth_sql: SELECT MAX(O_TOTALPRICE) FROM ORDERS
+
   # ---------- T2: joins and rankings ----------
   - id: T2-01
     group: T2
@@ -87,20 +106,62 @@ questions:
       LIMIT 1
   - id: T2-04
     group: T2
-    question: Which ten European suppliers offer the most parts?
+    question: Which ten European suppliers have the highest account balance?
     expected_status: ANSWERED
     order_matters: true
-    notes: Ties are possible at position 10; the runner should compare as a set if counts tie.
+    notes: Replaced "offer the most parts" in phase 1; every TPC-H supplier offers 80 parts.
     ground_truth_sql: |
-      SELECT S_NAME, COUNT(*) AS parts_offered
-      FROM PARTSUPP
-      JOIN SUPPLIER ON PS_SUPPKEY = S_SUPPKEY
+      SELECT S_NAME, S_ACCTBAL
+      FROM SUPPLIER
       JOIN NATION ON S_NATIONKEY = N_NATIONKEY
       JOIN REGION ON N_REGIONKEY = R_REGIONKEY
       WHERE R_NAME = 'EUROPE'
-      GROUP BY S_NAME
-      ORDER BY parts_offered DESC
+      ORDER BY S_ACCTBAL DESC
       LIMIT 10
+  - id: T2-05
+    group: T2
+    question: Which 5 nations had the highest total order revenue in 1995?
+    expected_status: ANSWERED
+    order_matters: true
+    notes: Found live in phase 0, when Gemma used C_NATIONKEY without joining CUSTOMER.
+    ground_truth_sql: |
+      SELECT N_NAME, SUM(L_EXTENDEDPRICE * (1 - L_DISCOUNT)) AS revenue
+      FROM LINEITEM
+      JOIN ORDERS ON L_ORDERKEY = O_ORDERKEY
+      JOIN CUSTOMER ON O_CUSTKEY = C_CUSTKEY
+      JOIN NATION ON C_NATIONKEY = N_NATIONKEY
+      WHERE O_ORDERDATE >= '1995-01-01' AND O_ORDERDATE < '1996-01-01'
+      GROUP BY N_NAME
+      ORDER BY revenue DESC
+      LIMIT 5
+  - id: T2-06
+    group: T2
+    question: How many customers are in each market segment?
+    expected_status: ANSWERED
+    ground_truth_sql: |
+      SELECT C_MKTSEGMENT, COUNT(*) FROM CUSTOMER GROUP BY C_MKTSEGMENT
+  - id: T2-07
+    group: T2
+    question: How many suppliers does each region have?
+    expected_status: ANSWERED
+    ground_truth_sql: |
+      SELECT R_NAME, COUNT(*)
+      FROM SUPPLIER
+      JOIN NATION ON S_NATIONKEY = N_NATIONKEY
+      JOIN REGION ON N_REGIONKEY = R_REGIONKEY
+      GROUP BY R_NAME
+  - id: T2-08
+    group: T2
+    question: What were the three most common ship modes for items shipped in 1997?
+    expected_status: ANSWERED
+    order_matters: true
+    ground_truth_sql: |
+      SELECT L_SHIPMODE, COUNT(*) AS items
+      FROM LINEITEM
+      WHERE L_SHIPDATE >= '1997-01-01' AND L_SHIPDATE < '1998-01-01'
+      GROUP BY L_SHIPMODE
+      ORDER BY items DESC
+      LIMIT 3
 
   # ---------- T3: multi-step and analysis ----------
   - id: T3-01
