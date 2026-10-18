@@ -306,7 +306,8 @@ def cmd_ui(args) -> int:
     from pathlib import Path
 
     app = Path(__file__).parent / "ui" / "app.py"
-    return subprocess.call([sys.executable, "-m", "streamlit", "run", str(app)])
+    theme = ["--theme.base", "dark", "--theme.primaryColor", "#8b5cf6"]
+    return subprocess.call([sys.executable, "-m", "streamlit", "run", str(app), *theme])
 
 
 def cmd_statuses(args) -> int:

@@ -94,7 +94,15 @@ Each answer card shows the status, the answer, assumption chips and a plain-lang
 explanation, with a collapsed **Evidence** section: the question as understood, the exact SQL,
 the Snowflake query ID, run details, the first 50 rows, the query facts read from the SQL,
 tables and columns used, the data's date coverage, the model and prompt versions, the answer
-check result and any limits. Evidence downloads as JSON.
+check result and any limits.
+
+The page also draws what fits the result, using only the rows shown as evidence: one number
+becomes a KPI card, a date or year with a number becomes a line chart, and up to 15 labelled
+numbers become a bar chart. Snowflake answers show the query ID with a copy button and a link to
+that query in Snowsight. Answers end with follow-up buttons built from the question (the year
+before, the same by year, the top 5), and the evidence offers the shown rows as CSV and a proof
+bundle as JSON (question, SQL, query facts, query ID, role, warehouse, times; no keys or
+settings).
 
 Offline (no Snowflake, no model), using a tiny synthetic fixture and a scripted stub that only
 knows the questions in `datasets/tpch_sf1/examples.yaml`:

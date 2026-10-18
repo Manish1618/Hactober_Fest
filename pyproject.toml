@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ui = ["streamlit==1.66.0"]
+ui = ["streamlit==1.66.0", "plotly==7.1.0"]
 dev = [
     "pytest==9.1.1",
     "ruff==0.17.1",
