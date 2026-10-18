@@ -122,7 +122,7 @@ class GoogleAIAdapter:
     Busy (429/503) replies are retried with backoff, then the fallback models are tried.
     """
 
-    RETRY_STATUS = {429, 500, 503}
+    RETRY_STATUS = {429, 500, 503, 504}  # 504: a hung call, also retried
 
     def __init__(self, settings: ModelSettings, client: httpx.Client | None = None):
         if not settings.api_key.get_secret_value():
@@ -130,7 +130,11 @@ class GoogleAIAdapter:
         self.settings = settings
         self.name = settings.name
         self._models = [settings.name, *settings.fallback_models]
-        self._client = client or httpx.Client(timeout=settings.timeout_seconds)
+        # A normal hosted call takes a few seconds; a hung one is retried rather than waited on.
+        timeout = (
+            settings.timeout_seconds if settings.thinking else min(settings.timeout_seconds, 60.0)
+        )
+        self._client = client or httpx.Client(timeout=timeout)
         self.backoff_seconds = 2.0
         self.attempts = 4  # per model: waits of about 2, 4, 8 and 16 seconds
 
@@ -158,6 +162,8 @@ class GoogleAIAdapter:
         url = f"{self.settings.endpoint.rstrip('/')}/models/{model}:generateContent"
         try:
             return self._client.post(url, json=payload, headers=self._headers())
+        except httpx.TimeoutException:
+            return httpx.Response(504, json={"error": {"message": "timed out"}})  # retried
         except httpx.HTTPError as e:
             raise ModelError(f"The model endpoint could not be reached: {type(e).__name__}") from e
 

@@ -154,3 +154,16 @@ def test_google_adapter_turns_thinking_off_by_default():
     _google(handler, thinking=True).generate("p", SqlDraft, prompt_version="v1")
     assert "Thinking is disabled" in bodies[0]["systemInstruction"]["parts"][0]["text"]
     assert "systemInstruction" not in bodies[1]
+
+
+def test_google_adapter_retries_a_hung_call():
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        if len(calls) == 1:
+            raise httpx.ReadTimeout("hung", request=request)
+        return httpx.Response(200, json=_reply('{"sql": "SELECT 3"}'))
+
+    assert _google(handler).generate("p", SqlDraft, prompt_version="v1").sql == "SELECT 3"
+    assert len(calls) == 2
