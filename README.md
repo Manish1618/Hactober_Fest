@@ -5,8 +5,8 @@ the exact SQL that ran, the Snowflake query ID, the result rows, and a plain-lan
 Google Gemma understands the question and drafts SQL; ordinary code checks it; Snowflake runs it
 under a read-only role.
 
-> Status: **phase 2 (trust features)**. Answers carry query facts, a number check and full
-> evidence; every response status is demonstrable with `datamind statuses`.
+> Status: **phases 3 to 5 built**. Two datasets (TPC-H and Our World in Data), a full golden
+> set with PRD section 3 targets, a data-change test and a role demo. See [Build status](#build-status).
 
 ## How a question is answered
 
@@ -134,10 +134,10 @@ tests/                  unit/, adversarial/, integration/
 | --- | --- | --- |
 | 0 Foundations | Skeleton, setup scripts, TPC-H config, model adapter, validator, golden set started, one question end to end | Done |
 | 1 Core pipeline | Classifier, SQL drafting with Gemma, repair loop, answer writer | Done: gate passed on Snowflake (T1 88%, T2 88%, T7 10/10) |
-| 2 Trust features | Query facts, number verifier, evidence panel, edge-case statuses | Gate passed on the offline fixture with hosted Gemma (faithfulness 100%, evidence 100%, every status shown); Snowflake run pending |
-| 3 Evaluation and hardening | Full golden set, runner, model benchmark | Not started |
-| 4 Reuse and polish | OWID dataset, dataset selector, role demo, UI | Not started |
-| 5 Docs and demo | Architecture, model setup, limitations, demo | Not started |
+| 2 Trust features | Query facts, number verifier, evidence panel, edge-case statuses | Done: gate passed on Snowflake (faithfulness 100%, evidence 100%, every status shown) |
+| 3 Evaluation and hardening | Full golden set, runner, model benchmark | Built; offline: 93% golden accuracy and every trust target met; Snowflake gate pending |
+| 4 Reuse and polish | OWID dataset, dataset selector, role demo, UI | Built (OWID config, load script, restricted-role dataset); OWID load on Snowflake pending |
+| 5 Docs and demo | Architecture, model setup, limitations, demo | Docs written (see Documentation); rehearsal pending |
 
 ## Documentation
 
