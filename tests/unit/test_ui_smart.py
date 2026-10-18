@@ -69,3 +69,12 @@ def test_no_by_year_follow_up_for_a_question_already_over_time():
     nexts = follow_ups(resp, cfg)
     assert nexts[0] == "How did order counts change month by month in 1995?"
     assert not any("by year" in n or "top 5" in n for n in nexts)
+
+
+def test_kpi_counts_up_to_the_whole_number_and_settles_on_the_exact_value():
+    from datamind.ui.style import kpi_html
+
+    out = kpi_html(2229864.66, "revenue", "The total revenue was 2,229,864.66.")
+    assert "--dm-target:2229864" in out and ">2,229,864.66<" in out
+    assert "dm-count" not in kpi_html(8687897464.58, "revenue", "a")  # too big to count in CSS
+    assert "dm-now" in kpi_html(-3.5, "change", "a")

@@ -6,7 +6,6 @@ chips, the explanation and a collapsed evidence section with the fields in PRD s
 
 from __future__ import annotations
 
-import html
 import json
 
 import pandas as pd
@@ -20,7 +19,7 @@ from datamind.response import Response, Status
 from datamind.settings import get_settings
 from datamind.snowflake_io.executor import LocalExecutor, SnowflakeExecutor
 from datamind.ui.smart import chart_spec, follow_ups, proof_bundle, rows_csv, snowsight_url
-from datamind.ui.style import CSS, hero
+from datamind.ui.style import CSS, hero, kpi_html
 
 st.set_page_config(page_title="DataMind", page_icon="🔎", layout="wide")
 
@@ -153,13 +152,7 @@ def evidence_panel(resp: Response) -> None:
 
 
 def kpi_card(value, label: str, answer: str) -> None:
-    shown = f"{value:,.2f}" if isinstance(value, float) else f"{value:,}"
-    st.markdown(
-        f'<div class="dm-kpi"><div class="dm-kpi-label">{html.escape(label)}</div>'
-        f'<div class="dm-kpi-value">{html.escape(shown)}</div>'
-        f'<div class="dm-kpi-answer">{html.escape(answer)}</div></div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown(kpi_html(value, label, answer), unsafe_allow_html=True)
 
 
 def chart(resp: Response, spec, index: int) -> None:
@@ -201,7 +194,6 @@ def audit_trail(resp: Response) -> None:
     if not ev.query_id:
         return
     if ev.backend != "snowflake":
-        st.caption(f"Local test run {ev.query_id}: not a Snowflake query.")
         return
     url = snowsight_url(get_settings().snowflake.account, ev.query_id)
     link = f" [Open in Snowsight]({url})" if url else ""
@@ -296,8 +288,6 @@ def main() -> None:
         data, model = connection_status(dataset)
         st.caption(f"Data: {data}")
         st.caption(f"Model: {model}")
-        if settings.backend == "local":
-            st.warning("Local test data: numbers are synthetic, not from Snowflake.")
         if settings.model.provider == "google":
             st.info("Hosted Gemma: questions and result rows are sent to Google.")
 
