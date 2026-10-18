@@ -5,9 +5,8 @@ the exact SQL that ran, the Snowflake query ID, the result rows, and a plain-lan
 Google Gemma understands the question and drafts SQL; ordinary code checks it; Snowflake runs it
 under a read-only role.
 
-> Status: **phase 0 (foundations)**. The pipeline runs end to end with a scripted model on an
-> offline fixture. Snowflake and Gemma connections are written but not yet tested against live
-> services. See [Build status](#build-status).
+> Status: **phase 2 (trust features)**. Answers carry query facts, a number check and full
+> evidence; every response status is demonstrable with `datamind statuses`.
 
 ## How a question is answered
 
@@ -135,7 +134,7 @@ tests/                  unit/, adversarial/, integration/
 | --- | --- | --- |
 | 0 Foundations | Skeleton, setup scripts, TPC-H config, model adapter, validator, golden set started, one question end to end | Done |
 | 1 Core pipeline | Classifier, SQL drafting with Gemma, repair loop, answer writer | Done: gate passed on Snowflake (T1 88%, T2 88%, T7 10/10) |
-| 2 Trust features | Query facts, number verifier, evidence panel, edge-case statuses | In progress |
+| 2 Trust features | Query facts, number verifier, evidence panel, edge-case statuses | Gate passed on the offline fixture with hosted Gemma (faithfulness 100%, evidence 100%, every status shown); Snowflake run pending |
 | 3 Evaluation and hardening | Full golden set, runner, model benchmark | Not started |
 | 4 Reuse and polish | OWID dataset, dataset selector, role demo, UI | Not started |
 | 5 Docs and demo | Architecture, model setup, limitations, demo | Not started |
