@@ -96,6 +96,14 @@ class SnowflakeExecutor:
             raise BackendUnavailable(
                 f"Could not connect to Snowflake: {type(e).__name__}: {e}"
             ) from e
+        try:
+            # Only the dataset's role may count: accounts can default users to
+            # DEFAULT_SECONDARY_ROLES = ('ALL'), which would add every other granted role.
+            self._conn.cursor().execute("USE SECONDARY ROLES NONE")
+        except Exception as e:
+            self._conn.close()
+            self._conn = None
+            raise BackendUnavailable(f"Could not drop secondary roles: {e}") from e
         return self._conn
 
     def run(self, sql: str, *, request_id: str, max_rows: int) -> QueryResult:

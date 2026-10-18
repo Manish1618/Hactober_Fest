@@ -21,9 +21,9 @@ snowflake:
   role: DATAMIND_RESTRICTED
 
 # The anchor is a YEAR number, not a date: coverage and "latest" resolve to a year such as 2023.
-# GDP per capita has no projected rows, so its latest year is the latest observed year.
+# This role can read only COUNTRY and LIFE_EXPECTANCY, so the anchor is LIFE_EXPECTANCY.
 time:
-  anchor_table: GDP_PER_CAPITA
+  anchor_table: LIFE_EXPECTANCY
   anchor_column: YEAR
   note: >
     Yearly data. Years are whole numbers (YEAR = 2019), not dates. Latest year means the latest
