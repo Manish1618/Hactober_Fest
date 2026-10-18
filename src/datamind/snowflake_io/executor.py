@@ -145,6 +145,10 @@ class LocalExecutor:
     def __init__(self, connection):
         self._conn = connection
 
+    @property
+    def connection(self):
+        return self._conn
+
     def run(self, sql: str, *, request_id: str, max_rows: int) -> QueryResult:
         started = time.perf_counter()
         try:

@@ -32,6 +32,7 @@ class SnowflakeSettings(BaseModel):
     private_key_path: str = ""
     private_key_passphrase: str = ""
     role: str = "DATAMIND_READER"
+    loader_role: str = "DATAMIND_LOADER"  # only the data-change test and load scripts use it
     warehouse: str = "DATAMIND_WH"
     statement_timeout_seconds: int = 30
 
@@ -90,6 +91,10 @@ def _model_settings() -> ModelSettings:
             name = GOOGLE_MODEL
         max_tokens = max(max_tokens, 8192)  # the model's thinking counts against this
         fallback = fallback or GOOGLE_FALLBACK
+    elif "googleapis.com" in endpoint:
+        endpoint = "http://localhost:11434"  # a hosted endpoint left in .env is not Ollama
+    if fallback.lower() == "none":
+        fallback = ""
     return ModelSettings(
         provider=provider,
         endpoint=endpoint,
@@ -112,6 +117,7 @@ def get_settings() -> Settings:
             private_key_path=_env("SNOWFLAKE_PRIVATE_KEY_PATH", ""),
             private_key_passphrase=_env("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE", ""),
             role=_env("SNOWFLAKE_ROLE", "DATAMIND_READER"),
+            loader_role=_env("SNOWFLAKE_LOADER_ROLE", "DATAMIND_LOADER"),
             warehouse=_env("SNOWFLAKE_WAREHOUSE", "DATAMIND_WH"),
             statement_timeout_seconds=int(_env("SNOWFLAKE_STATEMENT_TIMEOUT_SECONDS", "30")),
         ),

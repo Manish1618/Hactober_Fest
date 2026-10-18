@@ -1,4 +1,4 @@
-"""Command line: datamind check | smoke | ask | eval | statuses | ui."""
+"""Command line: datamind check | smoke | ask | eval | benchmark | statuses | ui."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import yaml
 
 from datamind.config import ConfigError, datasets_dir, load_dataset
 from datamind.config.models import DatasetConfig
+from datamind.evaluation.writers import LocalWriter, SnowflakeWriter, check_change
 from datamind.model.adapter import ModelError, ScriptedAdapter, build_adapter
 from datamind.pipeline.run import Pipeline
 from datamind.pipeline.validator import Catalog, validate
@@ -85,6 +86,13 @@ def cmd_check(args) -> int:
                 r = validate(q["ground_truth_sql"], catalog)
                 failures += not r.ok
                 print(f"{'ok  ' if r.ok else 'FAIL'} {q['id']} ground truth parses {r.reason}")
+            for change in q.get("change_sql") or []:
+                try:
+                    check_change(change, set(cfg.tables))
+                    print(f"ok   {q['id']} change_sql is a plain edit of the demo tables")
+                except ExecutionError as e:
+                    failures += 1
+                    print(f"FAIL {q['id']} {e}")
             if q.get("attack_sql"):
                 r = validate(q["attack_sql"], catalog)
                 failures += r.ok
@@ -181,6 +189,37 @@ def cmd_ask(args) -> int:
     return 0 if resp.status.value in ("ANSWERED", "NO_DATA") else 2
 
 
+def _writer(pipeline: Pipeline, settings, cfg: DatasetConfig):
+    """Writer for the T8 data-change test, matching the pipeline's backend."""
+    if isinstance(pipeline.executor, LocalExecutor):
+        return LocalWriter(pipeline.executor.connection, cfg)
+    return SnowflakeWriter(settings.snowflake, cfg, settings.snowflake.loader_role)
+
+
+def _print_report(report) -> tuple[bool, bool, bool]:
+    for g, (p, n) in report.by_group().items():
+        print(f"     {g}: {p}/{n} ({p / n:.0%})")
+    ok, summary = report.gate()
+    print(f"Gate {'PASSED' if ok else 'FAILED'}: {summary}")
+    trust_ok, trust_summary = report.trust()
+    print(f"Trust {'PASSED' if trust_ok else 'FAILED'}: {trust_summary}")
+    targets = report.targets()
+    print("Targets (PRD section 3):")
+    for t in targets:
+        print(f"  {'met ' if t.passed else 'GAP '} {t.name}: {t.value} (target {t.goal})")
+    targets_ok = all(t.passed for t in targets)
+    print(f"Targets {'MET' if targets_ok else 'NOT MET'}")
+    return ok, trust_ok, targets_ok
+
+
+def _show(r) -> None:
+    mark = "PASS" if r.passed else "FAIL"
+    trust = f"  [{r.trust_detail}]" if r.trust_detail else ""
+    retried = " (retried: model busy)" if r.retried else ""
+    line = f"{mark} {r.id:6} {r.status:11} {r.seconds:6.1f}s  {r.detail}{retried}{trust}"
+    print(line, flush=True)
+
+
 def cmd_eval(args) -> int:
     """Run the golden set through the pipeline and report accuracy per group."""
     from datamind.evaluation import load_set, run_eval
@@ -192,26 +231,54 @@ def cmd_eval(args) -> int:
     groups = set(args.groups.split(",")) if args.groups else None
     status = 0
     for split in ("golden", "heldout") if args.split == "all" else (args.split,):
+        if not (evaluation_dir() / split / f"{cfg.dataset}.yaml").is_file():
+            print(f"== {split}: no {cfg.dataset} questions, skipped ==")
+            continue
         golden = load_set(cfg.dataset, split)
         print(f"== {split} ({cfg.dataset}, model {pipeline.model.name}) ==")
-
-        def show(r):
-            mark = "PASS" if r.passed else "FAIL"
-            trust = f"  [{r.trust_detail}]" if r.trust_detail else ""
-            print(f"{mark} {r.id:6} {r.status:11} {r.seconds:6.1f}s  {r.detail}{trust}", flush=True)
-
-        report = run_eval(pipeline, golden, groups, progress=show, workers=args.workers)
-        for g, (p, n) in report.by_group().items():
-            print(f"     {g}: {p}/{n} ({p / n:.0%})")
-        ok, summary = report.gate()
-        print(f"Gate {'PASSED' if ok else 'FAILED'}: {summary}")
-        trust_ok, trust_summary = report.trust()
-        print(f"Trust {'PASSED' if trust_ok else 'FAILED'}: {trust_summary}")
+        needs_writer = any(q.change_sql for q in golden.questions)
+        writer = _writer(pipeline, settings, cfg) if needs_writer else None
+        report = run_eval(
+            pipeline, golden, groups, progress=_show, workers=args.workers, writer=writer
+        )
+        ok, trust_ok, targets_ok = _print_report(report)
         if args.trust:
             ok = ok and trust_ok
+        if args.targets:
+            ok = ok and targets_ok
         print(f"Report: {report.save(evaluation_dir() / 'reports')}")
         status |= 0 if ok else 1
     return status
+
+
+def cmd_benchmark(args) -> int:
+    """Run the golden set once per model variant and write docs/benchmark.md (FR-H4)."""
+    from datamind.evaluation import load_set, run_eval
+    from datamind.evaluation.benchmark import BenchmarkRow, write_benchmark
+    from datamind.evaluation.golden import evaluation_dir
+
+    settings = get_settings()
+    cfg = load_dataset(args.dataset or settings.dataset)
+    groups = set(args.groups.split(",")) if args.groups else None
+    rows = []
+    for spec in args.models.split(","):
+        provider, _, name = spec.partition(":")
+        os.environ["DATAMIND_MODEL_PROVIDER"] = provider
+        os.environ["DATAMIND_MODEL_NAME"] = name
+        os.environ["DATAMIND_MODEL_FALLBACK"] = "none"  # measure this variant alone
+        run_settings = get_settings()
+        args.model = provider
+        pipeline = _build(args, run_settings, cfg, phrase_answers=True)
+        for split in args.split.split(","):
+            golden = load_set(cfg.dataset, split)
+            print(f"== {provider}:{name} on {split} ==")
+            report = run_eval(pipeline, golden, groups, progress=_show, workers=args.workers)
+            _print_report(report)
+            saved = report.save(evaluation_dir() / "reports")
+            rows.append(BenchmarkRow.from_report(report, provider, saved.name))
+    path = write_benchmark(rows, args.out)
+    print(f"Benchmark written to {path}")
+    return 0
 
 
 STATUS_DEMO = [
@@ -301,7 +368,22 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument(
         "--trust", action="store_true", help="also require the phase 2 trust gate to pass"
     )
+    e.add_argument("--targets", action="store_true", help="also require the PRD section 3 targets")
     e.set_defaults(func=cmd_eval)
+
+    b = sub.add_parser("benchmark", help="compare Gemma variants on the golden set")
+    b.add_argument(
+        "--models",
+        default="google:gemma-4-26b-a4b-it,google:gemma-4-31b-it",
+        help="comma-separated provider:model, for example ollama:gemma3:12b",
+    )
+    b.add_argument("--dataset")
+    b.add_argument("--split", default="golden", help="golden, heldout or golden,heldout")
+    b.add_argument("--groups")
+    b.add_argument("--backend", choices=["snowflake", "local"])
+    b.add_argument("--workers", type=int, default=1)
+    b.add_argument("--out", default="docs/benchmark.md")
+    b.set_defaults(func=cmd_benchmark, model=None)
 
     st = sub.add_parser("statuses", help="show one example of every response status")
     st.add_argument("--dataset")

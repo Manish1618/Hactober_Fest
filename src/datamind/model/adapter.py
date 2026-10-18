@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import time
 from collections.abc import Callable
 from typing import Protocol, TypeVar
@@ -107,7 +108,10 @@ class OllamaAdapter:
         return f"{self.settings.name} available at {self.settings.endpoint}"
 
 
-NO_THINKING = "Answer immediately. Do not think or reason before answering; output only the JSON."
+NO_THINKING = (
+    "You are a JSON formatter. Respond with the final JSON at once. Thinking is disabled: "
+    "never write a thought, plan or reasoning step."
+)
 
 
 class GoogleAIAdapter:
@@ -128,6 +132,7 @@ class GoogleAIAdapter:
         self._models = [settings.name, *settings.fallback_models]
         self._client = client or httpx.Client(timeout=settings.timeout_seconds)
         self.backoff_seconds = 2.0
+        self.attempts = 4  # per model: waits of about 2, 4, 8 and 16 seconds
 
     def _headers(self) -> dict:
         return {"x-goog-api-key": self.settings.api_key.get_secret_value()}
@@ -159,7 +164,7 @@ class GoogleAIAdapter:
     def _chat(self, messages: list[dict]) -> str:
         last = ""
         for model in self._models:
-            for attempt in range(3):
+            for attempt in range(self.attempts):
                 resp = self._call(model, messages)
                 if resp.status_code == 200:
                     if model != self.name:
@@ -168,7 +173,8 @@ class GoogleAIAdapter:
                 last = f"{resp.status_code} {_error_message(resp)}"
                 if resp.status_code not in self.RETRY_STATUS:
                     raise ModelError(f"The model endpoint refused the request: {last}")
-                time.sleep(self.backoff_seconds * (2**attempt))
+                # Spread retries out so parallel callers do not hit the API in step.
+                time.sleep(self.backoff_seconds * (2**attempt) * random.uniform(1.0, 1.5))
         raise ModelError(f"The hosted model is busy: {last}")
 
     def generate(self, prompt: str, schema: type[T], *, prompt_version: str) -> T:

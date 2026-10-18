@@ -115,7 +115,7 @@ def test_google_adapter_retries_busy_then_falls_back():
         return httpx.Response(200, json=_reply('{"sql": "SELECT 2"}'))
 
     assert _google(handler).generate("p", SqlDraft, prompt_version="v1").sql == "SELECT 2"
-    assert sum("gemma-a" in c for c in calls) == 3 and "gemma-b" in calls[-1]
+    assert sum("gemma-a" in c for c in calls) == 4 and "gemma-b" in calls[-1]
 
 
 def test_google_adapter_does_not_retry_a_bad_key():

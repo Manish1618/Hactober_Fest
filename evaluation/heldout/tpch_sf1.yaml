@@ -68,7 +68,80 @@ questions:
       JOIN REGION ON N_REGIONKEY = R_REGIONKEY
       WHERE R_NAME = 'AFRICA'
       GROUP BY N_NAME
+  - id: H3-01
+    group: T3
+    question: What share of the orders placed in 1996 were urgent?
+    expected_status: ANSWERED
+    notes: Urgent is priority 1-URGENT. A fraction or a percentage both pass.
+    ground_truth_sql: |
+      SELECT COUNT_IF(O_ORDERPRIORITY = '1-URGENT') / COUNT(*) FROM ORDERS
+      WHERE O_ORDERDATE >= '1996-01-01' AND O_ORDERDATE < '1997-01-01'
+  - id: H3-02
+    group: T3
+    question: What was the highest monthly revenue in 1995?
+    expected_status: ANSWERED
+    ground_truth_sql: |
+      SELECT MAX(revenue) FROM (
+        SELECT DATE_TRUNC('MONTH', O_ORDERDATE) AS month,
+          SUM(L_EXTENDEDPRICE * (1 - L_DISCOUNT)) AS revenue
+        FROM LINEITEM JOIN ORDERS ON L_ORDERKEY = O_ORDERKEY
+        WHERE O_ORDERDATE >= '1995-01-01' AND O_ORDERDATE < '1996-01-01'
+        GROUP BY month
+      ) AS monthly
+  - id: H4-01
+    group: T4
+    question: What's the mean discount on a line item?
+    expected_status: ANSWERED
+    ground_truth_sql: SELECT AVG(L_DISCOUNT) FROM LINEITEM
+  - id: H4-02
+    group: T4
+    question: Total revenue from BUILDING segment customers during 1994?
+    expected_status: ANSWERED
+    ground_truth_sql: |
+      SELECT SUM(L_EXTENDEDPRICE * (1 - L_DISCOUNT))
+      FROM LINEITEM
+      JOIN ORDERS ON L_ORDERKEY = O_ORDERKEY
+      JOIN CUSTOMER ON O_CUSTKEY = C_CUSTKEY
+      WHERE C_MKTSEGMENT = 'BUILDING'
+        AND O_ORDERDATE >= '1994-01-01' AND O_ORDERDATE < '1995-01-01'
+  - id: H4-03
+    group: T4
+    question: Break down 1995 orders by priority.
+    expected_status: ANSWERED
+    ground_truth_sql: |
+      SELECT O_ORDERPRIORITY, COUNT(*) FROM ORDERS
+      WHERE O_ORDERDATE >= '1995-01-01' AND O_ORDERDATE < '1996-01-01'
+      GROUP BY O_ORDERPRIORITY
+  - id: H5-01
+    group: T5
+    question: How many orders were placed in 1994?
+    expected_status: ANSWERED
+    ground_truth_sql: |
+      SELECT COUNT(*) FROM ORDERS
+      WHERE O_ORDERDATE >= '1994-01-01' AND O_ORDERDATE < '1995-01-01'
+  - id: H5-02
+    group: T5
+    follows: H5-01
+    question: How many of those were urgent?
+    expected_status: ANSWERED
+    ground_truth_sql: |
+      SELECT COUNT(*) FROM ORDERS
+      WHERE O_ORDERDATE >= '1994-01-01' AND O_ORDERDATE < '1995-01-01'
+        AND O_ORDERPRIORITY = '1-URGENT'
   - id: H6-01
     group: T6
     question: Show revenue for customers in Narnia.
     expected_status: NO_DATA
+  - id: H6-02
+    group: T6
+    question: Which customers are the most valuable?
+    expected_status: CLARIFY
+    ambiguous: true
+  - id: H6-03
+    group: T6
+    question: Will order volume grow next quarter?
+    expected_status: UNSUPPORTED
+  - id: H6-04
+    group: T6
+    question: Write me a poem about our suppliers.
+    expected_status: UNSUPPORTED

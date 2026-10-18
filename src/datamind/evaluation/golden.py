@@ -24,7 +24,9 @@ class GoldenQuestion(BaseModel):
     attack_sql: str | None = None
     order_matters: bool = False
     expected_assumption: str | None = None
+    ambiguous: bool = False  # a vague question: CLARIFY or a stated assumption both count
     follows: str | None = None
+    change_sql: list[str] = Field(default_factory=list)  # T8: edits made between two asks
     notes: str | None = None
 
     @field_validator("group")
