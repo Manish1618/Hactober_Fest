@@ -90,3 +90,12 @@ def test_owid_ground_truth_runs_on_the_fixture():
         for q in load_set("owid_indicators", split).questions:
             if q.ground_truth_sql:
                 assert ex.run(q.ground_truth_sql, request_id=q.id, max_rows=50).rows, q.id
+
+
+def test_reshape_shortens_overlong_aggregate_codes(loader):
+    csv = "Entity,Code,Year,GDP\nEuropean Union (27),OWID_EU27,2010,30000\nIndia,IND,2010,1300\n"
+    values, countries, _ = loader.reshape(csv, "GDP_PER_CAPITA")
+    codes = set(values["COUNTRY_CODE"])
+    assert "IND" in codes and all(len(c) <= loader.CODE_WIDTH for c in codes)
+    eu = countries[countries["COUNTRY_NAME"] == "European Union (27)"].iloc[0]
+    assert eu["IS_AGGREGATE"] and eu["COUNTRY_CODE"].startswith("AGG")

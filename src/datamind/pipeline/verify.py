@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 from datamind.config.models import DatasetConfig
@@ -55,7 +55,11 @@ def _allowed(values: list[Any]) -> set[Decimal]:
             continue
         out.add(d.normalize())
         for places in (0, 1, 2):
+            # Formatters differ on halves (-0.405 can show as -0.40 or -0.41): allow each way.
+            step = Decimal(1).scaleb(-places)
             out.add(round(d, places).normalize())
+            out.add(d.quantize(step, rounding=ROUND_HALF_UP).normalize())
+            out.add(Decimal(f"{float(d):.{places}f}").normalize())
     return out
 
 
@@ -130,6 +134,8 @@ def missing_facts(
         column = g if "." in g else _qualified(g, facts)
         if not any(t in text for t in _terms(column, cfg)):
             missing.append(f"grouped by {g}")
+    if not facts.group_by and re.search(r"\bgroup(?:ed|ing|s)?\b", text):
+        missing.append("grouping mentioned, but the query has no GROUP BY")
     if facts.limit is not None:
         words = {w for w, n in _WORDS.items() if n == facts.limit}
         if str(facts.limit) not in text and not any(w in text for w in words):

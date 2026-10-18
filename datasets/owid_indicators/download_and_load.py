@@ -101,8 +101,11 @@ def reshape(csv_text: str, table: str) -> tuple[pd.DataFrame, pd.DataFrame, str]
 
     df["_name"] = df[entity].astype(str).str.strip()
     raw_code = df[code] if code else pd.Series([None] * len(df))
+    # Missing codes and codes too long for VARCHAR(8) (such as OWID_EU27) get a stable AGG code.
     df["_code"] = [
-        c.strip() if isinstance(c, str) and c.strip() else aggregate_code(n)
+        (c.strip() if len(c.strip()) <= CODE_WIDTH else aggregate_code(c.strip()))
+        if isinstance(c, str) and c.strip()
+        else aggregate_code(n)
         for c, n in zip(raw_code, df["_name"], strict=True)
     ]
     df["_aggregate"] = [
@@ -110,10 +113,6 @@ def reshape(csv_text: str, table: str) -> tuple[pd.DataFrame, pd.DataFrame, str]
         or (c.strip().startswith("OWID_") and c.strip() not in OWID_COUNTRY_CODES)
         for c in raw_code
     ]
-    too_long = sorted({c for c in df["_code"] if len(c) > CODE_WIDTH})
-    if too_long:
-        raise LoadError(f"{table}: codes longer than {CODE_WIDTH} characters: {too_long[:5]}")
-
     hist = df[historical[0]] if historical else pd.Series([float("nan")] * len(df))
     proj = df[projected[0]] if projected else pd.Series([float("nan")] * len(df))
     values = pd.DataFrame(

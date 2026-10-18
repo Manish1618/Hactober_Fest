@@ -78,5 +78,22 @@ def test_verify_combines_numbers_and_facts(facts, tpch):
     rows = [["INDIA", 100.5], ["CHINA", 90.25]]
     ok = verify("INDIA led with 100.50.", explain(facts, tpch), "q", rows, facts, 2, tpch)
     assert ok.passed, ok.summary()
-    bad = verify("INDIA led with 101.", "Grouped by nation.", "q", rows, facts, 2, tpch)
-    assert not bad.passed and bad.untraced_numbers == ["101"] and bad.missing_facts
+    bad = verify("INDIA led with 102.", "Grouped by nation.", "q", rows, facts, 2, tpch)
+    assert not bad.passed and bad.untraced_numbers == ["102"] and bad.missing_facts
+
+
+def test_verifier_accepts_either_rounding_of_a_half():
+    from decimal import Decimal
+
+    cell = [Decimal("-229131483.4050")]
+    assert untraced_numbers("Change: -229,131,483.41", cell) == []
+    assert untraced_numbers("Change: -229,131,483.40", cell) == []
+    assert untraced_numbers("Change: -229,131,483.42", cell) == ["-229,131,483.42"]
+
+
+def test_invented_grouping_is_flagged(tpch):
+    from datamind.pipeline.facts import QueryFacts
+
+    facts = QueryFacts(tables=["LINEITEM"], measures=["SUM(L_EXTENDEDPRICE) AS revenue"])
+    assert missing_facts("Summed the price, grouped by the result.", facts, tpch)
+    assert not missing_facts("Summed the price over all line items.", facts, tpch)

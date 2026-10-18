@@ -465,6 +465,11 @@ class Pipeline:
                 f"Dates used: {facts.date_range[0]} to {facts.date_range[1]} "
                 f"({facts.date_column.split('.')[-1]}).",
             ]
+        elif self.dataset.time and self.coverage() and not _time_filtered(facts, self):
+            assumptions = [
+                *assumptions,
+                f"No time period given: all dates in the data ({self.coverage()}).",
+            ]
         evidence.query_id = result.query_id
         evidence.elapsed_seconds = result.elapsed_seconds
         evidence.executed_at = result.executed_at
@@ -547,3 +552,15 @@ def _swap(question: str, old: str, new: str) -> str:
     """The question with the missing value replaced, when the value appears in it."""
     pattern = re.compile(re.escape(old), re.IGNORECASE)
     return pattern.sub(new, question, count=1) if pattern.search(question) else ""
+
+
+def _time_filtered(facts: QueryFacts, pipe: Pipeline) -> bool:
+    """Whether the query limits time at all: a date column, or any column named like the anchor."""
+    anchor = pipe.dataset.time.anchor_column.upper() if pipe.dataset.time else ""
+    names = [f.column for f in facts.filters]
+    if any(n in pipe.date_columns or n.split(".")[-1] == anchor for n in names):
+        return True
+    text = " ".join(facts.other_conditions + facts.group_by).upper()
+    return bool(anchor and anchor in text) or any(
+        c.split(".")[-1] in text for c in pipe.date_columns
+    )
