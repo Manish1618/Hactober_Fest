@@ -15,3 +15,6 @@ keys/
 # Raw downloads (OWID) stay local unless the licence is confirmed
 data/raw/
 evaluation/reports/*.json
+
+# Local agent worktrees
+.claude/worktrees/
