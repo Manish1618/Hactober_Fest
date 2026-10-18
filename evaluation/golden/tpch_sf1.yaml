@@ -332,8 +332,9 @@ questions:
     follows: T5-05
     question: Which countries are they from?
     expected_status: ANSWERED
+    notes: The countries are the answer; repeating the supplier names is optional.
     ground_truth_sql: |
-      SELECT S_NAME, N_NAME
+      SELECT N_NAME
       FROM SUPPLIER JOIN NATION ON S_NATIONKEY = N_NATIONKEY
       ORDER BY S_ACCTBAL DESC
       LIMIT 5

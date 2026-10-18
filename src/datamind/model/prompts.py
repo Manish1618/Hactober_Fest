@@ -8,7 +8,7 @@ from typing import Any
 
 from datamind.config.models import DatasetConfig
 
-UNDERSTAND = "understand_v3"
+UNDERSTAND = "understand_v4"
 DRAFT_SQL = "draft_sql_v2"
 ANSWER = "answer_v2"
 

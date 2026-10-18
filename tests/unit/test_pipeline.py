@@ -58,7 +58,7 @@ def test_answers_with_evidence(tpch, fixture_db):
     assert ev.rows_returned == 1 and ev.columns == ["revenue"]
     assert ev.tables == ["LINEITEM", "ORDERS"]
     assert "LIMIT 100" in ev.sql
-    assert ev.prompt_versions == ["understand_v3", "draft_sql_v2", "answer_v2"]
+    assert ev.prompt_versions == ["understand_v4", "draft_sql_v2", "answer_v2"]
     assert ev.data_latest_date.startswith("1998")
     assert resp.assumptions == ["assumed", "Dates used: 1994-01-01 to 1994-12-31 (O_ORDERDATE)."]
     assert "1994-01-01 to 1994-12-31" in resp.explanation
