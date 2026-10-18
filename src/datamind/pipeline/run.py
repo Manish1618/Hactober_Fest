@@ -97,6 +97,7 @@ class Pipeline:
         )
         self._latest_date: str | None = None
         self._coverage = ""
+        self.hidden_tables: list[str] | None = None  # set on the first question (US-14)
         self.date_columns = {
             f"{t}.{c}"
             for t, table in dataset.tables.items()
@@ -124,6 +125,44 @@ class Pipeline:
             first, last = (str(_cell(v)) for v in r.rows[0])
             self._latest_date = last
             self._coverage = f"{t.anchor_table}.{t.anchor_column} from {first} to {last}"
+
+    def check_access(self) -> list[str]:
+        """Drop configured tables the Snowflake role cannot see (US-14, FR-G4, EC-10).
+
+        INFORMATION_SCHEMA lists only what the current role may read. If the listing fails or
+        is empty (for example the offline fixture), nothing is hidden. Hidden tables leave the
+        schema Gemma sees and the validator's allow-list, so they cannot be queried or guessed.
+        """
+        if self.hidden_tables is not None:
+            return self.hidden_tables
+        self.hidden_tables = []
+        schema = self.dataset.snowflake.schema_.upper().replace("'", "")
+        try:
+            r = self.executor.run(
+                "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
+                f"WHERE UPPER(TABLE_SCHEMA) = '{schema}'",
+                request_id="access-check",
+                max_rows=10000,
+            )
+        except ExecutionError as e:
+            log.warning("could not list the tables this role can see: %s", e)
+            return self.hidden_tables
+        visible = {str(row[0]).upper() for row in r.rows}
+        if not visible:
+            return self.hidden_tables
+        self.hidden_tables = sorted(t for t in self.dataset.tables if t not in visible)
+        if self.hidden_tables:
+            log.info("tables hidden from role: %s", ", ".join(self.hidden_tables))
+            kept = {t: v for t, v in self.dataset.tables.items() if t in visible}
+            joins = [j for j in self.dataset.joins if {j.left_table, j.right_table} <= set(kept)]
+            self.dataset = self.dataset.model_copy(update={"tables": kept, "joins": joins})
+            self.catalog = Catalog(
+                tables=self.dataset.catalog(),
+                database=self.dataset.snowflake.database,
+                schema=self.dataset.snowflake.schema_,
+                joins=self.dataset.join_pairs(),
+            )
+        return self.hidden_tables
 
     def latest_date(self) -> str:
         """Latest value of the configured time column; anchors relative dates (FR-A4)."""
@@ -334,6 +373,7 @@ class Pipeline:
             return done(Status.BLOCKED, reason=unsafe)
 
         # 3. Understand: rewrite follow-ups and classify (Gemma).
+        hidden = self.check_access()
         history = conversation.history_text() if conversation else ""
         try:
             evidence.prompt_versions.append(UNDERSTAND)
@@ -377,11 +417,13 @@ class Pipeline:
             # No usable options: answer with the most common reading instead of asking badly.
         if u.category == "unsupported":
             suggestions = [u.alternative] if u.alternative else []
-            return done(
-                Status.UNSUPPORTED,
-                reason=u.reason or "The data cannot answer this question.",
-                suggestions=suggestions,
-            )
+            reason = u.reason or "The data cannot answer this question."
+            if hidden:  # EC-10: say what this role cannot see instead of guessing
+                reason += (
+                    f" Your Snowflake role ({self.dataset.snowflake.role}) has no access to "
+                    f"{', '.join(hidden)}, so questions about them cannot be answered here."
+                )
+            return done(Status.UNSUPPORTED, reason=reason, suggestions=suggestions)
 
         # 4-7. Draft, validate, execute, repair.
         evidence.data_latest_date = self.latest_date()

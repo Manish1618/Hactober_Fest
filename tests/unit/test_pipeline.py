@@ -44,7 +44,7 @@ class Exploding:
     backend = "should-not-run"
 
     def run(self, sql, *, request_id, max_rows):
-        if request_id == "time-anchor":  # the read-only MAX(date) lookup is allowed
+        if request_id in ("time-anchor", "access-check"):  # fixed read-only lookups
             raise ExecutionError("no data")
         raise AssertionError("blocked SQL reached the executor")
 
@@ -312,3 +312,21 @@ def test_total_over_no_rows_is_no_data(tpch, fixture_db):
     )
     assert resp.status is Status.NO_DATA
     assert "ATLANTIS" in resp.reason
+
+
+def test_tables_the_role_cannot_see_are_hidden(tpch):
+    """US-14: a restricted role sees fewer tables; they leave the schema and the allow-list."""
+    from datamind.snowflake_io.executor import QueryResult
+
+    class Restricted:
+        backend = "fake"
+
+        def run(self, sql, *, request_id, max_rows):
+            assert request_id == "access-check"
+            rows = [("NATION",), ("REGION",)]
+            return QueryResult(["TABLE_NAME"], rows, "q1", 0.0, "now", "fake")
+
+    pipe = Pipeline(tpch, ScriptedAdapter(lambda p, v: {}), Restricted())
+    assert "CUSTOMER" in pipe.check_access()
+    assert set(pipe.dataset.tables) == {"NATION", "REGION"}
+    assert set(pipe.catalog.tables) == {"NATION", "REGION"}
