@@ -124,6 +124,10 @@ def evidence_panel(resp: Response) -> None:
             f"**Model:** {ev.model}, prompts {', '.join(ev.prompt_versions) or 'none'}"
             + (f", {ev.repair_attempts} repair(s)" if ev.repair_attempts else "")
         )
+        if ev.alignment:
+            st.markdown(f"**Alignment check:** {ev.alignment}")
+            if ev.alignment_restated:
+                st.caption(f"Second reading of the SQL: {ev.alignment_restated}")
         if ev.verification:
             st.markdown(f"**Answer check:** {ev.verification}")
         for limit in ev.limits:
@@ -220,6 +224,8 @@ def answer_card(resp: Response, question: str, index: int) -> None:
             chart(resp, spec, index)
         audit_trail(resp)
     elif resp.status is Status.CLARIFY and resp.clarification:
+        if resp.evidence.alignment.startswith("failed") and resp.reason:
+            st.markdown(resp.reason)
         st.markdown(resp.clarification.question)
         cols = st.columns(len(resp.clarification.options) or 1)
         for i, option in enumerate(resp.clarification.options):
@@ -242,7 +248,11 @@ def answer_card(resp: Response, question: str, index: int) -> None:
             st.button(s, key=f"sug-{index}-{i}", on_click=ask, args=(s,))
     if resp.status is Status.ERROR:
         st.button("Retry", key=f"retry-{index}", on_click=ask, args=(question,))
-    if resp.status in (Status.ANSWERED, Status.NO_DATA) or resp.evidence.rejected_sql:
+    if (
+        resp.status in (Status.ANSWERED, Status.NO_DATA)
+        or resp.evidence.rejected_sql
+        or resp.evidence.alignment.startswith("failed")
+    ):
         evidence_panel(resp)
     nexts = follow_ups(resp, dataset_cfg)
     if nexts:

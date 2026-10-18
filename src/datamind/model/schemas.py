@@ -55,3 +55,17 @@ class AnswerDraft(BaseModel):
     explanation: str = Field(
         default="", description="One or two sentences on how the answer was found, from the facts."
     )
+
+
+class Alignment(BaseModel):
+    """Second opinion: does this query answer this question? (alignment check)"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    restated: str = Field(description="What the query computes, in one plain sentence.")
+    matches: bool = Field(description="True only if the query answers exactly the question asked.")
+    problems: list[str] = Field(
+        default_factory=list,
+        description="Each way the query differs from the question: metric, filter, period, "
+        "grouping, ranking or limit. Empty when it matches.",
+    )

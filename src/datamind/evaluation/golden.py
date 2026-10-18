@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from datamind.config.loader import datasets_dir
 
-GROUPS = {"T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8"}
+GROUPS = {"T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9"}  # T9: near-miss traps
 STATUSES = {"ANSWERED", "CLARIFY", "NO_DATA", "UNSUPPORTED", "BLOCKED", "ERROR"}
 
 

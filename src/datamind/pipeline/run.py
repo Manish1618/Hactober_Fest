@@ -20,14 +20,17 @@ from sqlglot import exp
 from datamind.config.models import DatasetConfig
 from datamind.model.adapter import ModelAdapter, ModelError
 from datamind.model.prompts import (
+    ALIGN,
     ANSWER,
     DRAFT_SQL,
     UNDERSTAND,
+    render_align,
     render_answer,
     render_draft_sql,
     render_understand,
 )
-from datamind.model.schemas import AnswerDraft, SqlDraft, Understanding
+from datamind.model.schemas import Alignment, AnswerDraft, SqlDraft, Understanding
+from datamind.pipeline.align import code_problems
 from datamind.pipeline.answer import (
     explain,
     fill_placeholders,
@@ -86,8 +89,10 @@ class Pipeline:
         executor: Executor,
         max_rows: int = 1000,
         phrase_answers: bool = True,
+        check_alignment: bool = True,
     ):
         self.dataset = dataset
+        self.check_alignment = check_alignment  # second-opinion model pass (align_v1)
         self.model = model
         self.executor = executor
         self.max_rows = max_rows
@@ -197,14 +202,18 @@ class Pipeline:
         return self._coverage
 
     def _draft_and_run(
-        self, question: str, request_id: str, evidence: Evidence
+        self,
+        question: str,
+        request_id: str,
+        evidence: Evidence,
+        feedback: list[tuple[str, str]] | None = None,
     ) -> tuple[SqlDraft | None, QueryResult | None, str, str, bool]:
         """Draft, validate and execute with up to MAX_REPAIRS repairs.
 
         Returns (draft, result, failure_code, failure_reason, limit_added); result is None on
         failure. BackendUnavailable and QueryTimeout propagate: new SQL will not fix them.
         """
-        failed: list[tuple[str, str]] = []
+        failed: list[tuple[str, str]] = list(feedback or [])
         draft: SqlDraft | None = None
         code, reason = "", ""
         for attempt in range(MAX_REPAIRS + 1):
@@ -294,6 +303,29 @@ class Pipeline:
     @staticmethod
     def _traces(answer: str, question: str, rows: list[list], n: int) -> bool:
         return not untraced_numbers(answer, [v for r in rows for v in r], question, [n, len(rows)])
+
+    def _alignment(
+        self, question: str, evidence: Evidence, facts: QueryFacts
+    ) -> tuple[list[str], list[str]]:
+        """(problems code can prove, doubts from the model's second opinion) for the current SQL."""
+        problems = code_problems(question, evidence.sql, facts)
+        if problems or not self.check_alignment:
+            return problems, []
+        try:
+            verdict = self.model.generate(
+                render_align(self.dataset, question, evidence.sql, facts.lines()),
+                Alignment,
+                prompt_version=ALIGN,
+            )
+        except ModelError as e:  # a second opinion is optional; never fail the answer on it
+            log.warning("alignment check skipped: %s", e)
+            return [], []
+        if ALIGN not in evidence.prompt_versions:
+            evidence.prompt_versions.append(ALIGN)
+        evidence.alignment_restated = verdict.restated
+        if verdict.matches:
+            return [], []
+        return [], verdict.problems or ["The query may not answer the question as asked."]
 
     def _fix_case(
         self, sql: str, facts: QueryFacts, limit_added: bool, request_id: str
@@ -520,6 +552,54 @@ class Pipeline:
             )
 
         facts = extract_facts(evidence.sql, self.catalog, self.date_columns, limit_added)
+
+        # 7b. Alignment: does this query answer the question asked? Repair once if not.
+        problems, doubts = self._alignment(standalone, evidence, facts)
+        if problems or doubts:
+            first = (problems or doubts)[0]
+            kept = (draft, result, facts, limit_added, evidence.sql, evidence.tables)
+            note = "The query did not answer the question: " + " ".join(problems or doubts)
+            try:
+                d2, r2, _, _, l2 = self._draft_and_run(
+                    standalone, request_id, evidence, [(evidence.sql, note)]
+                )
+            except (ModelError, BackendUnavailable, QueryTimeout):
+                d2, r2, l2 = None, None, False
+            if r2 is not None:
+                f2 = extract_facts(evidence.sql, self.catalog, self.date_columns, l2)
+                p2, dbt2 = self._alignment(standalone, evidence, f2)
+                if (len(p2), len(dbt2)) < (len(problems), len(doubts)):
+                    draft, result, facts, limit_added = d2, r2, f2, l2
+                    problems, doubts = p2, dbt2
+                    kept = None
+            if kept:
+                draft, result, facts, limit_added, evidence.sql, evidence.tables = kept
+                evidence.rejected_sql = ""
+            if not problems and not doubts:
+                evidence.alignment = f"repaired: the first query did not match ({first})"
+        if problems:
+            evidence.alignment = "failed: " + " ".join(problems)
+            return done(
+                Status.CLARIFY,
+                reason="I could not write a query that matches your question exactly. "
+                + " ".join(problems),
+                clarification=Clarification(
+                    question="Could you rephrase the question, naming the measure, period "
+                    "and how many results you want?",
+                    options=[],
+                ),
+                assumptions=draft.assumptions if draft else [],
+            )
+        if doubts:
+            evidence.alignment = "flagged: " + " ".join(doubts)
+            evidence.limits.append(
+                "The alignment check could not confirm that this query matches the question: "
+                + " ".join(doubts)
+            )
+        elif not evidence.alignment:
+            evidence.alignment = "passed"
+        if draft:
+            assumptions = draft.assumptions
         if result.row_count == 0:  # a filter value written in the wrong case: fix it once
             fixed = self._fix_case(evidence.sql, facts, limit_added, request_id)
             if fixed:

@@ -144,6 +144,8 @@ def _print_response(resp: Response) -> None:
     print(f"Model:    {ev.model}  prompts {', '.join(ev.prompt_versions) or 'none'}")
     if ev.repair_attempts:
         print(f"Repairs:  {ev.repair_attempts}")
+    if ev.alignment:
+        print(f"Aligned:  {ev.alignment}")
     if ev.sql:
         print("SQL:\n" + "\n".join("  " + line for line in ev.sql.splitlines()))
     if ev.query_id:

@@ -11,6 +11,7 @@ from datamind.config.models import DatasetConfig
 UNDERSTAND = "understand_v4"
 DRAFT_SQL = "draft_sql_v2"
 ANSWER = "answer_v2"
+ALIGN = "align_v1"
 
 
 def load_template(name: str) -> str:
@@ -129,4 +130,12 @@ def render_answer(
             "rows": format_rows(columns, rows),
             "facts": "\n".join(facts or []) or "(none)",
         },
+    )
+
+
+def render_align(cfg: DatasetConfig, question: str, sql: str, facts: list[str]) -> str:
+    return _fill(
+        load_template(ALIGN),
+        trusted={"defaults": _defaults(cfg)},
+        untrusted={"question": question, "sql": sql, "facts": "\n".join(facts) or "(none)"},
     )

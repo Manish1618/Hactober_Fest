@@ -133,6 +133,8 @@ def proof_bundle(resp: Response) -> dict:
         "data_coverage": ev.data_coverage,
         "model": ev.model,
         "prompt_versions": ev.prompt_versions,
+        "alignment": ev.alignment,
+        "alignment_restated": ev.alignment_restated,
         "verification": ev.verification,
         "limits": ev.limits,
         "licence_note": ev.licence_note,

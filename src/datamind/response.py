@@ -52,6 +52,8 @@ class Evidence(BaseModel):
     model: str = ""
     prompt_versions: list[str] = Field(default_factory=list)
     limits: list[str] = Field(default_factory=list)
+    alignment: str = ""  # passed, repaired: ..., flagged: ... or failed: ...
+    alignment_restated: str = ""  # the second opinion's plain reading of the SQL
 
 
 class Response(BaseModel):
