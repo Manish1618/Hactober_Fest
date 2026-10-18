@@ -110,7 +110,7 @@ datamind smoke [--dataset tpch_sf1]
 ```
 
 Reports Snowflake and the model separately (`cmd_smoke` in `src/datamind/cli.py`). For Snowflake
-it prints the role, warehouse, `REGION` row count and query ID. For the model it confirms the
+it prints the role, warehouse, row count of the dataset's first table and query ID. For the model it confirms the
 model name is available on the endpoint.
 
 ## Benchmark

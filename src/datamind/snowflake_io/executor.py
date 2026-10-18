@@ -128,13 +128,14 @@ class SnowflakeExecutor:
         )
 
     def smoke(self) -> str:
+        table = next(iter(self.dataset.tables))
         r = self.run(
-            "SELECT CURRENT_ROLE(), CURRENT_WAREHOUSE(), COUNT(*) FROM REGION",
+            f"SELECT CURRENT_ROLE(), CURRENT_WAREHOUSE(), COUNT(*) FROM {table}",
             request_id="smoke",
             max_rows=1,
         )
-        role, wh, regions = r.rows[0]
-        return f"role={role} warehouse={wh} REGION rows={regions} query_id={r.query_id}"
+        role, wh, rows = r.rows[0]
+        return f"role={role} warehouse={wh} {table} rows={rows} query_id={r.query_id}"
 
 
 class LocalExecutor:

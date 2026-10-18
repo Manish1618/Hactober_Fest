@@ -90,7 +90,7 @@ edit of the dataset's tables, and checks that every `attack_sql` is rejected.
 Then:
 
 ```bash
-datamind smoke --dataset <name>       # note: the smoke query reads a table named REGION
+datamind smoke --dataset <name>       # counts the rows of the first configured table
 datamind ask "..." --dataset <name>
 datamind eval --dataset <name>
 ```
