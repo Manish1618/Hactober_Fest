@@ -111,5 +111,4 @@ tests/                  unit/, adversarial/, integration/
 
 ## Licence
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). TPC-H is referenced, not copied. Gemma
-weights are not redistributed.
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). TPC-H is referenced, not copied. Gemma weights are not redistributed.
