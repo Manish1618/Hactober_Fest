@@ -255,9 +255,9 @@ def build_owid_fixture(seed: int = 11):
 
 
 # Offline fixture per dataset; datasets not listed here use the TPC-H fixture.
-_FIXTURES = {"owid_indicators": build_owid_fixture}
+_FIXTURES = {"OWID": build_owid_fixture}  # by Snowflake schema, so role variants share it
 
 
 def build_fixture_for(cfg):
     """The offline fixture that matches a dataset configuration."""
-    return _FIXTURES.get(cfg.dataset, build_fixture)()
+    return _FIXTURES.get(cfg.snowflake.schema_.upper(), build_fixture)()
