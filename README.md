@@ -139,6 +139,15 @@ tests/                  unit/, adversarial/, integration/
 | 4 Reuse and polish | OWID dataset, dataset selector, role demo, UI | Not started |
 | 5 Docs and demo | Architecture, model setup, limitations, demo | Not started |
 
+## Documentation
+
+- [Architecture](docs/architecture.md): pipeline steps, statuses, write barriers, what the model sees
+- [Model setup](docs/model-setup.md): hosted and local Gemma, licence, speed, smoke test, benchmark
+- [Dataset onboarding](docs/dataset-onboarding.md): adding a dataset with configuration only
+- [Evaluation](docs/evaluation.md): test sets, scoring rules, gates, commands, latest results
+- [Limitations](docs/limitations.md): what DataMind does not do
+- [Demo script](docs/demo-script.md): the ten demo steps and what to do if the network fails
+
 ## Licence
 
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). TPC-H is referenced, not copied. Gemma weights are not redistributed.
