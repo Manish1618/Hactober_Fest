@@ -238,6 +238,19 @@ def test_empty_filter_explains_the_missing_value(tpch, fixture_db):
     assert resp.suggestions and "Atlantis" not in resp.suggestions[0]
 
 
+def test_filter_value_in_the_wrong_case_is_matched(tpch, fixture_db):
+    resp = run(
+        tpch,
+        fixture_db,
+        "SELECT C_NAME FROM CUSTOMER JOIN NATION ON C_NATIONKEY = N_NATIONKEY "
+        "WHERE N_NAME = 'Germany'",
+        "Show customers in Germany",
+    )
+    assert resp.status is Status.ANSWERED
+    assert "'GERMANY'" in resp.evidence.sql
+    assert any("stored value 'GERMANY'" in a for a in resp.assumptions)
+
+
 def test_empty_date_range_reports_coverage(tpch, fixture_db):
     resp = run(
         tpch,

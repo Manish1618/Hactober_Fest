@@ -14,6 +14,9 @@ import re
 import uuid
 from decimal import Decimal
 
+import sqlglot
+from sqlglot import exp
+
 from datamind.config.models import DatasetConfig
 from datamind.model.adapter import ModelAdapter, ModelError
 from datamind.model.prompts import (
@@ -273,6 +276,47 @@ class Pipeline:
     def _traces(answer: str, question: str, rows: list[list], n: int) -> bool:
         return not untraced_numbers(answer, [v for r in rows for v in r], question, [n, len(rows)])
 
+    def _fix_case(
+        self, sql: str, facts: QueryFacts, limit_added: bool, request_id: str
+    ) -> tuple[str, QueryFacts, QueryResult, str] | None:
+        """Rerun an empty query once when a filter value only differs from a stored one by case.
+
+        'AFRICA' for 'Africa', or 'India' for 'INDIA': the model cannot see the stored casing.
+        """
+        for f in facts.filters:
+            if f.op not in ("=", "IN") or f.column == facts.date_column:
+                continue
+            table, _, col = f.column.rpartition(".")
+            if table not in self.catalog.tables:
+                continue
+            for value in f.values:
+                if _exists(self, table, col, value, request_id):
+                    continue
+                stored = _same_but_case(self, table, col, value, request_id)
+                if not stored:
+                    continue
+                checked = validate(
+                    _replace_literal(sql, value, stored), self.catalog, max_rows=self.max_rows
+                )
+                if not checked.ok:
+                    return None
+                try:
+                    result = self.executor.run(
+                        checked.sql, request_id=request_id, max_rows=self.max_rows
+                    )
+                except ExecutionError:
+                    return None
+                if result.row_count == 0:
+                    return None
+                new_facts = extract_facts(checked.sql, self.catalog, self.date_columns, limit_added)
+                return (
+                    checked.sql,
+                    new_facts,
+                    result,
+                    f"Matched {value!r} to the stored value {stored!r}.",
+                )
+        return None
+
     def _diagnose_empty(
         self, facts: QueryFacts, question: str, request_id: str
     ) -> tuple[str, list[str]]:
@@ -455,6 +499,11 @@ class Pipeline:
             )
 
         facts = extract_facts(evidence.sql, self.catalog, self.date_columns, limit_added)
+        if result.row_count == 0:  # a filter value written in the wrong case: fix it once
+            fixed = self._fix_case(evidence.sql, facts, limit_added, request_id)
+            if fixed:
+                evidence.sql, facts, result, note = fixed
+                assumptions = [*assumptions, note]
         evidence.query_facts = facts.lines()
         evidence.columns_used = facts.columns_used
         evidence.role = str(result.meta.get("role") or "")
@@ -535,6 +584,34 @@ def _exists(p: Pipeline, table: str, column: str, value: str, request_id: str) -
         return bool(p.executor.run(sql, request_id=request_id, max_rows=1).rows)
     except ExecutionError:
         return True  # unknown, so do not blame this filter
+
+
+def _same_but_case(p: Pipeline, table: str, column: str, value: str, request_id: str) -> str:
+    """The one stored value equal to value ignoring case, or "" when there is none or several."""
+    sql = (
+        f"SELECT DISTINCT {column} FROM {table} "
+        f"WHERE UPPER({column}) = UPPER({_quote(value)}) LIMIT 2"
+    )
+    if not validate(sql, p.catalog).ok:
+        return ""
+    try:
+        rows = p.executor.run(sql, request_id=request_id, max_rows=2).rows
+    except ExecutionError:
+        return ""
+    return str(rows[0][0]) if len(rows) == 1 and rows[0][0] is not None else ""
+
+
+def _replace_literal(sql: str, old: str, new: str) -> str:
+    """The SQL with every string literal equal to old replaced by new."""
+    tree = sqlglot.parse_one(sql, read="snowflake")
+    tree = tree.transform(
+        lambda n: (
+            exp.Literal.string(new)
+            if isinstance(n, exp.Literal) and n.is_string and n.this == old
+            else n
+        )
+    )
+    return tree.sql(dialect="snowflake")
 
 
 def _top_values(p: Pipeline, table: str, column: str, request_id: str) -> list[str]:
