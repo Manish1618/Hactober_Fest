@@ -101,6 +101,7 @@ class Pipeline:
         self._latest_date: str | None = None
         self._coverage = ""
         self.hidden_tables: list[str] | None = None  # set on the first question (US-14)
+        self.hidden_terms: list[str] = []  # words that name hidden data, such as "gdp per capita"
         self.date_columns = {
             f"{t}.{c}"
             for t, table in dataset.tables.items()
@@ -158,7 +159,14 @@ class Pipeline:
             log.info("tables hidden from role: %s", ", ".join(self.hidden_tables))
             kept = {t: v for t, v in self.dataset.tables.items() if t in visible}
             joins = [j for j in self.dataset.joins if {j.left_table, j.right_table} <= set(kept)]
-            self.dataset = self.dataset.model_copy(update={"tables": kept, "joins": joins})
+            metrics = {
+                k: m for k, m in self.dataset.metrics.items() if _metric_tables(m.sql) <= set(kept)
+            }
+            defaults = [d for d in self.dataset.defaults if not d.metric or d.metric in metrics]
+            self.hidden_terms = _hidden_terms(self.dataset, kept, metrics)
+            self.dataset = self.dataset.model_copy(
+                update={"tables": kept, "joins": joins, "metrics": metrics, "defaults": defaults}
+            )
             self.catalog = Catalog(
                 tables=self.dataset.catalog(),
                 database=self.dataset.snowflake.database,
@@ -166,6 +174,17 @@ class Pipeline:
                 joins=self.dataset.join_pairs(),
             )
         return self.hidden_tables
+
+    def _names_hidden(self, question: str) -> bool:
+        """Whether the question asks about data the role cannot see (answer it, never swap)."""
+        text = question.lower()
+        return any(re.search(rf"\b{re.escape(t)}\b", text) for t in self.hidden_terms)
+
+    def _no_access_reason(self, hidden: list[str]) -> str:
+        return (
+            f"Your Snowflake role ({self.dataset.snowflake.role}) has no access to "
+            f"{', '.join(hidden)}, so questions about them cannot be answered here."
+        )
 
     def latest_date(self) -> str:
         """Latest value of the configured time column; anchors relative dates (FR-A4)."""
@@ -418,6 +437,8 @@ class Pipeline:
 
         # 3. Understand: rewrite follow-ups and classify (Gemma).
         hidden = self.check_access()
+        if self._names_hidden(q):
+            return done(Status.UNSUPPORTED, reason=self._no_access_reason(hidden))
         history = conversation.history_text() if conversation else ""
         try:
             evidence.prompt_versions.append(UNDERSTAND)
@@ -434,6 +455,9 @@ class Pipeline:
         if u.used_context and conversation:
             last = conversation.turns[-1]
             evidence.context_used = f"Previous question: {last.standalone_question}"
+
+        if self._names_hidden(standalone):
+            return done(Status.UNSUPPORTED, reason=self._no_access_reason(hidden))
 
         # The rewritten question gets the same code guard as the original.
         unsafe = unsafe_reason(standalone)
@@ -463,10 +487,7 @@ class Pipeline:
             suggestions = [u.alternative] if u.alternative else []
             reason = u.reason or "The data cannot answer this question."
             if hidden:  # EC-10: say what this role cannot see instead of guessing
-                reason += (
-                    f" Your Snowflake role ({self.dataset.snowflake.role}) has no access to "
-                    f"{', '.join(hidden)}, so questions about them cannot be answered here."
-                )
+                reason += " " + self._no_access_reason(hidden)
             return done(Status.UNSUPPORTED, reason=reason, suggestions=suggestions)
 
         # 4-7. Draft, validate, execute, repair.
@@ -570,6 +591,30 @@ def _looks_english(text: str) -> bool:
     words = set(re.findall(r"\w+", text.lower()))
     foreign = {"cuántos", "cuantos", "qué", "cuál", "quels", "combien", "wie", "viele", "welche"}
     return not (words & foreign)
+
+
+def _metric_tables(sql: str) -> set[str]:
+    return {m.upper() for m in re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\.", sql)}
+
+
+def _hidden_terms(cfg: DatasetConfig, kept: dict, metrics: dict) -> list[str]:
+    """Names and synonyms of hidden tables and metrics that no visible one also uses."""
+
+    def words(name: str) -> str:
+        return name.lower().replace("_", " ")
+
+    visible = {words(t) for t in kept} | {words(k) for k in metrics}
+    visible |= {s.lower() for m in metrics.values() for s in m.synonyms}
+    visible |= {s.lower() for t in kept.values() for c in t.columns.values() for s in c.synonyms}
+    terms = set()
+    for name, table in cfg.tables.items():
+        if name not in kept:
+            terms.add(words(name))
+            terms |= {s.lower() for c in table.columns.values() for s in c.synonyms}
+    for name, m in cfg.metrics.items():
+        if name not in metrics:
+            terms |= {words(name), *(s.lower() for s in m.synonyms)}
+    return sorted(t for t in terms if t and t not in visible)
 
 
 def _quote(value: str) -> str:

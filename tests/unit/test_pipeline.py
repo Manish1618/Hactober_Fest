@@ -343,3 +343,30 @@ def test_tables_the_role_cannot_see_are_hidden(tpch):
     assert "CUSTOMER" in pipe.check_access()
     assert set(pipe.dataset.tables) == {"NATION", "REGION"}
     assert set(pipe.catalog.tables) == {"NATION", "REGION"}
+
+
+def test_question_about_hidden_data_is_refused_before_drafting():
+    """EC-10: asking about a hidden table gets no-access, never a swapped metric."""
+    from datamind.config.loader import load_dataset
+    from datamind.snowflake_io.executor import QueryResult
+
+    cfg = load_dataset("owid_restricted")
+
+    class Restricted:
+        backend = "fake"
+
+        def run(self, sql, *, request_id, max_rows):
+            if request_id == "access-check":
+                rows = [("COUNTRY",), ("LIFE_EXPECTANCY",)]
+                return QueryResult(["TABLE_NAME"], rows, "q1", 0.0, "now", "fake")
+            return QueryResult(["Y"], [(1990, 2023)], "q2", 0.0, "now", "fake")
+
+    def never(prompt, version):
+        raise AssertionError("the model must not be asked")
+
+    pipe = Pipeline(cfg, ScriptedAdapter(never), Restricted())
+    resp = pipe.ask("What was GDP per capita in India in 2015?")
+    assert resp.status is Status.UNSUPPORTED
+    assert "GDP_PER_CAPITA" in resp.reason
+    assert "gdp_per_capita" not in pipe.dataset.metrics
+    assert "life expectancy" not in pipe.hidden_terms
